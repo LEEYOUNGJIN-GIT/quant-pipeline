@@ -101,3 +101,11 @@ def test_pattern_matching_requires_a_prefix_on_the_test_name_or_the_file():
 def test_exit_status_follows_overall(status):
     r = report(PASS if status == "pass" else {**PASS, "tests/unit/test_x.py::test_a": "failed"})
     assert (r["overall"] == "pass") == (status == "pass")
+
+
+def test_a_lock_candidate_run_never_reports_the_lock_as_accepted(monkeypatch, tmp_path):
+    monkeypatch.setenv("QUANT_LOCK_CANDIDATE", "1")
+    ok, note = verify.special_accepted_lock()
+    assert ok is False and "CANDIDATE" in note
+    monkeypatch.delenv("QUANT_LOCK_CANDIDATE")
+    assert verify.special_accepted_lock()[0] is (ROOT / "uv.lock").exists()

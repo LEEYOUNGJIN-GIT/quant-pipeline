@@ -72,6 +72,9 @@ def match(results: dict[str, str], pattern: str) -> dict[str, str]:
 # ------------------------------------------------------------------------------------------------ special evidence
 def special_accepted_lock() -> tuple[bool, str]:
     lock = ROOT / "uv.lock"
+    if os.environ.get("QUANT_LOCK_CANDIDATE") == "1":
+        return False, ("uv.lock is a lock CANDIDATE in this run (spec 2.2): it becomes the accepted lock only after this verification "
+                       "passes on the target runtime, then it is committed as uv.lock")
     if not lock.exists():
         return False, "no accepted uv.lock: the environment is not frozen (spec 2.2 accepts the lock only after target-VM verification)"
     return True, "uv.lock present: " + "sha256:" + hashlib.sha256(lock.read_bytes()).hexdigest()

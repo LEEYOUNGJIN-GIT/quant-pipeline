@@ -348,3 +348,7 @@ Still failing or partial, with causes:
 - INV-BUDGET-001 and INV-BLACKBOX-001: the host-capacity check `host_ram` (3.4 GiB available on the development PC against 4 GiB configured). The configured requirement was not lowered; both are expected to be re-checked on a host with enough memory.
 - INV-DATA-001 (research profile cannot run), INV-DATA-002 (spec 4.3 reconciliation levels 2 and 3), INV-FETCH-001 (collector): not implemented.
 - INV-GOV-001: probe and SHA audit exist; no CI run exists yet (`local_only`).
+
+### Phase 7 continuation: CI (2026-10-15)
+
+`.github/workflows/ci.yml` runs the spec 20.2 sequence on CPython 3.12: bootstrap uv (versions recorded), sync from the lock, static doctor, plan, after-plan doctor, fixture run, probe, `verify.py`, evidence upload. Third-party Actions are pinned to commit SHAs checked against upstream with `git ls-remote` (checkout v7.0.1, setup-python v7.0.0, upload-artifact v7.0.2). `uv.lock.candidate` (73 packages, resolved on the development PC for `requires-python >=3.12`) is **not an accepted lock**: CI installs it as a candidate (`QUANT_LOCK_CANDIDATE=1`), `verify.py` reports the lock check as failing for it by design, and it is renamed to `uv.lock` only after a CI run on the target runtime passes. No CI result is claimed until a real run exists.
