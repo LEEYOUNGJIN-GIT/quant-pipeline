@@ -13,7 +13,7 @@
     22
   ],
   "evidence_class": "independent_oracle",
-  "input_manifest_hash": "sha256:f1121df79b915840d264c535ab9af298272373d906edd00c14f79997652fe81d",
+  "input_manifest_hash": "sha256:521a05d650b501f750e2b61370e19c5464c392a9ec60bf838af3ef8fcbb58076",
   "oracle_source_hash": "sha256:b02c29b4c8e9751a8ad5b42acdd9815d2787a6ac49b4fef3c15fac0b0d5441f5",
   "output_hashes": {
     "bootstrap_indices.sha256": "sha256:63dc1e2e64ded492e27aad388ce3600d3d21ddeb8255f4ac0060dc2430ca23c1",
