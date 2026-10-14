@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# project
+.venv-bootstrap/
+outputs/
+data/cache/
+data/interim/
+data/processed/
+_*.log
+_*.txt

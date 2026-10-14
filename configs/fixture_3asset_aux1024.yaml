@@ -1,0 +1,130 @@
+schema_version: "5.3.2"
+profile: {name: fixture_3asset, profile_type: fixture, base_currency: KRW, timezone: UTC}
+paths: {output_root: outputs/runs, report_template: src/quant_pipeline/templates/report.md.j2}
+data:
+  mode: fixture
+  offline_required: true
+  scenario: fixture-v5
+  generation_lock: data/fixtures/fixture_3asset/fixture_generation.lock.json
+  manifest: data/fixtures/fixture_3asset/manifest.json
+  prices_raw: data/fixtures/fixture_3asset/prices_raw.parquet
+  prices_total_return: data/fixtures/fixture_3asset/prices_total_return.parquet
+  fx: data/fixtures/fixture_3asset/fx_krw_per_usd.parquet
+  rates: data/fixtures/fixture_3asset/rates_krw_rfr.parquet
+  corporate_actions: data/fixtures/fixture_3asset/corporate_actions.parquet
+  initial_holdings: data/fixtures/fixture_3asset/initial_holdings.csv
+  fixture_window:
+    seed_observation_start_session: "2023-12-28"
+    decision_start_session: "2024-01-02"
+    decision_end_session: "2024-05-20"
+    xnys_anchor_rows: 97
+    complete_case_return_rows: 90
+    warmup_rows: 20
+    model_eligible_rows: 70
+    pre_holdout_rows: 60
+universe:
+  cash_asset_id: CASH_KRW
+  risky_asset_min_count: 3
+  risky_asset_max_count: 3
+  assets:
+    - {asset_id: KRX_A, exchange: XKRX, currency: KRW, timezone: Asia/Seoul, calendar: XKRX, raw_price_field: close, model_price_field: total_return_index, lot_size: 1, quantity_precision: 0, allow_short: false, benchmark_eligible: true, max_weight: 0.60}
+    - {asset_id: KRX_B, exchange: XKRX, currency: KRW, timezone: Asia/Seoul, calendar: XKRX, raw_price_field: close, model_price_field: total_return_index, lot_size: 1, quantity_precision: 0, allow_short: false, benchmark_eligible: true, max_weight: 0.60}
+    - {asset_id: NYSE_C, exchange: XNYS, currency: USD, timezone: America/New_York, calendar: XNYS, raw_price_field: close, model_price_field: total_return_index, lot_size: 1, quantity_precision: 0, allow_short: false, benchmark_eligible: true, max_weight: 0.60}
+availability: {price_publication_delay: PT15M, fx_publication_delay: PT15M, rate_publication_delay_business_days: 0, max_price_stale_sessions: 2, max_fx_stale_hours: 72, max_rate_stale_business_days: 5, stale_rate_policy: halt}
+calendars: {provider: exchange_calendars, required: [XKRX, XNYS], exact_tie_exchange_order: [XKRX, XNYS]}
+panel: {anchor_calendar: XNYS, alignment: asof_backward, return_type: simple, no_update_return: null, complete_case_requires_all_updated: true, max_stale_sessions: 2, minimum_daily_rows: 20, weekly_common_cutoff: friday_235959_utc, minimum_weekly_rows: 8}
+valuation: {schedule: every_xnys_anchor_session, max_krx_stale_sessions: 2, stale_limit_breach_policy: halt, accrue_cash_at_rate_and_valuation_events: true, expected_outer_oos_intervals: 22, expected_holdout_intervals: 12}
+decision_schedule: {frequency: every_eligible_row, rule: every_eligible_canonical_cutoff, anchor: XNYS_close, decision_delay: PT15M, order_latency: PT0S, max_order_age_sessions: 2}
+fx: {pair_id: USDKRW, quote_convention: KRW_per_USD, allow_inverse_input: false}
+cash: {source_id: fixture_krw_rfr, provider_from_manifest: false, quote_basis: annual_simple, day_count: "ACT/365F", accrual: simple, allow_negative: false, stale_rate_fallback: null}
+features: {return_horizons: [2,5,10], volatility_window: 10, residual_z_window: 10, drawdown_window: 20, min_observations: 8, clip_z: 4.0, score_mass_floor: 1.0e-12, positive_mass_reference: training_positive_type7_median}
+pca: {n_components_candidates: [1], select_in_inner_loop: false, maximum_components: 1, standardize: true, sign_rule: largest_abs_loading_positive}
+covariance: {baseline: ledoit_wolf, assume_centered: false, lookback_rows: 20, min_observations: 12, psd_eigen_floor: -1.0e-12, max_psd_repair_frobenius: 1.0e-10, async_correction: {enabled: false, method: hayashi_yoshida}, diagnostics: {lag_rows: [-2,-1,0,1,2], alternate_anchor: XKRX}}
+regime:
+  mode: fixed_regime_table
+  fixed_table: {path: data/fixtures/fixture_3asset/fixed_regime_table.csv}
+  hmm: {enabled_for_decisions: false, n_states_candidates: [2], em_fitter: hmmlearn, covariance_type: diag, max_iterations: 200, em_tolerance: 1.0e-6, state_alignment: volatility_then_mean_then_index}
+  hmm_pipeline_probe: {enabled: true, require_nonidentity_alignment_case: true}
+  state_labels_by_n_states: {2: [low_risk, high_risk]}
+  agent_gate_candidates:
+    - name: fixture_gate
+      family: fixture
+      applies_to_n_states: 2
+      by_state_label:
+        low_risk:  {Trend: 1.20, MeanReversion: 1.00, Defensive: 0.60, Diversification: 1.00}
+        high_risk: {Trend: 0.50, MeanReversion: 0.70, Defensive: 1.50, Diversification: 1.20}
+  all_zero_gate_fallback: equal
+  allow_smoothed_in_investable: false
+agents:
+  failure_policy: halt
+  trend: {horizon_weight_candidates: [[0.2,0.3,0.5]], volatility_scale: true, risk_budget_cap: 0.90}
+  mean_reversion: {source: pca_residual, entry_z_candidates: [1.0], exit_z: 0.25, risk_budget_cap: 0.70}
+  defensive: {risk_budget_cap: 0.70, downside_window: 20, downside_floor: 1.0e-6, factor_loading_penalty: 1.0, drawdown_penalty: 2.0, overlay_base_risky_budget: 0.80, overlay_min_risky_budget: 0.20, overlay_gamma_candidates: [0.75,1.0]}
+  diversification: {method: long_only_minimum_variance, fallback: inverse_volatility_capped_simplex, risk_budget_cap: 0.80, volatility_floor: 1.0e-6, min_meaningful_risky_budget: 0.05, minvar_ridge: 1.0e-10, minvar_eigen_floor: 1.0e-12}
+risk_pressure_calibration:
+  start_quantile: 0.50
+  full_quantile: 0.90
+  threshold_gap_floor: 1.0e-6
+  minimum_training_decisions: 8
+  factor_window_rows: 20
+  factor_min_observations: 12
+  fallback: {drawdown: [0.05,0.20], factor: [0.50,0.80], liquidity: [0.00,0.67]}
+objective:
+  lambda_track_candidates: [0.5,1.0]
+  lambda_risk_candidates: [1.0]
+  lambda_cost_candidates: [0.5,1.0]
+  calibration: {virtual_initialization: profile_initial_holdings, median: type7, component_scale_floor: 1.0e-6, diagonal_weight_min: 0.01, diagonal_weight_max: 100.0, scale_floor_track: 1.0e-8, scale_floor_risk: 1.0e-10, scale_floor_cost: 1.0e-8}
+constraints:
+  long_only: true
+  target_cash_floor: 0.05
+  minimum_post_trade_cash_base: 0.00
+  turnover_one_way_limit: 0.50
+  usd_exposure_limit: 0.50
+  solver: OSQP
+  infeasible_policy: cash_only
+  emergency_de_risk: {enabled: true, sell_only_turnover_override: minimum_required, untradable_residual_policy: halt}
+solver_policy:
+  primary: {solver: OSQP, eps_abs: 1.0e-7, eps_rel: 1.0e-7, max_iter: 20000}
+  acceptance: {primal_residual_max: 1.0e-8, dual_residual_max: 1.0e-7}
+  numerical_retry: {maximum_retries: 1, eps_abs: 1.0e-8, eps_rel: 1.0e-8, max_iter: 100000, polish: true}
+  primal_infeasible_verification: {require_certificate: true, require_phase1_confirmation: true}
+  fallback_chain: [accept_if_valid, retry_once, hold_previous_if_within_B_final, use_marked_holdings_at_first_decision, emergency_sell_only_if_over_B_final, halt]
+  on_dual_infeasible: halt
+costs: {sensitivity_multipliers: [0.0,1.0,2.0], commission_bps: 5.0, half_spread_slippage_bps: 5.0, sell_tax_bps: {XKRX: 0.0, XNYS: 0.0}, fx_conversion_bps: 2.0, minimum_fee_base: 0.0, tax_zero_is_research_placeholder: true}
+execution: {price_field: close, delay_rule: next_executable_close_strictly_after_decision, sizing_nav: pre_cost_nav, lot_rounding: toward_zero, event_order: utc_then_priority_then_exchange_then_asset_then_order, same_timestamp_sells_before_buys: true, underfunded_buy_policy: reduce_by_lot_reverse_priority_then_reject, partial_fill_model: false}
+accounting: {external_cash_flows: false, money_decimal_places: 2, accrue_cash_before_event: true, corporate_action_reconciliation: {split_relative_tolerance: 1.0e-8, per_event_bps: 5.0, rolling_window_bps: 25.0, fixture_breach_scope: run}}
+benchmarks:
+  primary_id: equal_weight_periodic
+  required_benchmark_eligible_count: 3
+  partial_trade_rule: pro_rata_then_lot_recheck
+  staged_entry_max_active_decisions: 12
+  target_attainment_tolerance: 0.0025
+  definitions:
+    - {benchmark_id: cash_krw, type: cash, risk_free_source: same_as_strategy, primary: false}
+    - {benchmark_id: equal_weight_periodic, type: rules, members: benchmark_eligible, total_risky_weight: 0.90, decision_schedule: same_as_strategy, initial_deployment_policy: obey_ordinary_turnover, execution_and_cost_model: same_as_strategy, comparability: implementation_matched, primary: true}
+    - {benchmark_id: equal_weight_staged_entry, type: rules, members: benchmark_eligible, total_risky_weight: 0.90, decision_schedule: same_as_strategy_until_target_then_hold, initial_deployment_policy: obey_ordinary_turnover, execution_and_cost_model: same_as_strategy, comparability: implementation_matched, primary: false}
+    - {benchmark_id: equal_weight_buy_and_hold_reference, type: rules, members: benchmark_eligible, total_risky_weight: 0.90, decision_schedule: initial_shared_decision_only, initial_deployment_policy: exempt_initial_net_deployment_only, execution_and_cost_model: same_as_strategy, comparability: reference_initial_turnover_exempt, primary: false}
+  external_indices_from_manifest: []
+evaluation:
+  method: nested_outer_inner_continuous_oos
+  periods_per_year: 252
+  outer: {initial_train_rows: 40, test_rows: 10, step_rows: 10, maximum_folds: 2, minimum_decisions_per_test: 8, minimum_fills_per_test: 8, minimum_scored_nav_intervals_per_test: 8}
+  inner: {folds: 2, validation_rows: 5, minimum_train_rows: 20, selection_metric: net_excess_sharpe, minimum_decisions_per_validation: 4, minimum_fills_per_validation: 4, minimum_scored_nav_intervals_per_validation: 4, initialization: common_anchor_then_candidate_replay}
+  continuous_refit: {mode: expanding, every_rows: 5, start_at_first_eligible_decision: true}
+  purge: {mode: event_time_auto, minimum_rows: 2}
+  embargo_rows: 1
+  execution_tail: carry_pending_exactly_once
+  max_parameter_trials: 8
+  trial_sampler: {method: sobol_scrambled, engine: scipy, engine_from_lock: true, seed_stream: trial_sobol, max_attempted_points_rule: max_1024_or_32x_space}
+  trial_tie_breakers: [lower_turnover, lower_complexity, trial_hash]
+  selection_score_tolerance: 1.0e-12
+  early_stopping: {enabled: false}
+  carry_nav_across_folds: true
+final_holdout: {split_mode: tail_rows, rows: 10, minimum_decisions: 8, minimum_fills: 8, minimum_scored_nav_intervals: 8, sealed: true, refit_policy: forward_refit_frozen_hyperparameters, max_openings_per_lineage: 1, acknowledgement_env: QUANT_FINAL_HOLDOUT_ACK, required_acknowledgement: I_UNDERSTAND_THIS_OPENS_THE_FINAL_HOLDOUT}
+bootstrap: {method: stationary_block, replicates: 200, mean_block_length: 5, confidence_level: 0.95, interval: percentile, minimum_oos_rows: 22, expected_oos_rows: 22, expected_index_shape: [200,22], intervals_are_inferential: false}
+compute_budget: {max_model_fit_units: 128, max_calibration_units: 256, max_rolling_kernel_evaluations: 512, max_allocation_optimizer_solves: 3000, max_auxiliary_optimizer_solves: 1024, max_total_optimizer_solves: 4096, max_solver_attempts_per_problem: 2, max_ledger_replays: 128, max_bootstrap_replicates: 200, max_checkpoints: 2048, total_wall_clock_minutes: 60, ingestion_minutes: 5, inner_selection_minutes: 25, outer_evaluation_minutes: 15, reporting_minutes: 5, verification_reserve_minutes: 10, per_trial_seconds: 300, logical_cpu_cores: 2, memory_gib: 4, disk_gib: 2, concurrent_solvers_per_trial: 1}
+reproducibility:
+  random_streams: {fixture_data: 1728, trial_sobol: 1729, bootstrap: 1730, provider_jitter: 1731, hmm_em: 1732}
+  numeric_threads: 1
+  tolerances: {golden_arithmetic: {atol: 1.0e-12, rtol: 1.0e-10}, matrix_reference: {atol: 1.0e-12, rtol: 1.0e-8}, constraint_feasibility: 1.0e-8, solver_weight_same_platform_atol: 1.0e-8, solver_objective_same_platform_atol: 1.0e-10, solver_weight_cross_platform_atol: 5.0e-7, solver_objective_cross_platform_atol: 1.0e-8, solver_objective_cross_platform_rtol: 1.0e-6}
+verification: {report_path: outputs/verify_report.json, fail_on_skipped_mandatory: true, fresh_context_black_box: true, network_deny_required: true, clean_and_resume_runs: true}

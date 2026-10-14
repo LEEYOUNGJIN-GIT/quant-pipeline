@@ -1,0 +1,34 @@
+[project]
+name = "quant-pipeline"
+version = "0.0.1"
+description = "Heterogeneous-agent multi-market quant research pipeline (spec: IMPLEMENTATION_SPEC.md v5.3.2)"
+# Spec 2.2 targets CPython 3.12. Development currently runs on 3.13 (recorded as a deviation in PROGRESS.md).
+requires-python = ">=3.12"
+dependencies = [
+    "numpy", "scipy", "pandas", "pyarrow", "scikit-learn", "hmmlearn",
+    "exchange-calendars", "cvxpy", "osqp", "pydantic>=2", "pyyaml", "rfc8785",
+    "jinja2", "typer",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "hypothesis", "ruff", "mypy"]
+research-online = ["yfinance"]
+
+[project.scripts]
+quant-pipeline = "quant_pipeline.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:hmmlearn.*"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests", "tools"]

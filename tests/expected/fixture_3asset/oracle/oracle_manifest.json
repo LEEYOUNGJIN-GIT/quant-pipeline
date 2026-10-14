@@ -1,0 +1,32 @@
+{
+  "algorithm_ids": {
+    "bootstrap": "oracle-stationary-bootstrap-v1-politis-romano",
+    "calendar": "oracle-calendar-v1",
+    "events": "oracle-event-queue-v1",
+    "hmm": "oracle-forward-filter-v1",
+    "ledger": "oracle-decimal-ledger-v1",
+    "panel": "oracle-asof-panel-v1",
+    "sobol": "oracle-sobol-floor-map-v1"
+  },
+  "bootstrap_shape": [
+    200,
+    22
+  ],
+  "evidence_class": "independent_oracle",
+  "input_manifest_hash": "sha256:f1121df79b915840d264c535ab9af298272373d906edd00c14f79997652fe81d",
+  "oracle_source_hash": "sha256:b02c29b4c8e9751a8ad5b42acdd9815d2787a6ac49b4fef3c15fac0b0d5441f5",
+  "output_hashes": {
+    "bootstrap_indices.sha256": "sha256:63dc1e2e64ded492e27aad388ce3600d3d21ddeb8255f4ac0060dc2430ca23c1",
+    "calendar_sessions.csv": "sha256:0e92955546d86dcb17c96c42eb5469846baa556cf8d240d74deffabd0b0b5537",
+    "event_queue.csv": "sha256:d72f51ba54744f58ea61d7c04667067548d683b4c037987bbacc5b6b9a83ab75",
+    "hmm_filter.json": "sha256:71821a61a5e6f5c297f629a246d48e0f27a6a6243519342b9f8193628f7643bd",
+    "ledger_projection.csv": "sha256:0f098623d52a1895f0325035af7f128f71fac0258c3580b6c660447d50b9abc6",
+    "panel_daily_weekly.csv": "sha256:b968d4d5c91940ddfbcaa045850b22fff4a0c576e2fc2196f72f7a28693d257d",
+    "sobol_meta.json": "sha256:e6ec7244b350fec9ead1b3af0c9e19335f732141df52017d5bd067f882275124",
+    "sobol_points.csv": "sha256:3bb57d1d63a811acabffafc14730c5835789e06924c13fb9c18a195b221f1f5d"
+  },
+  "seed_streams": {
+    "bootstrap": 1730,
+    "trial_sobol": 1729
+  }
+}
