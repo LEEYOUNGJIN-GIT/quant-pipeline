@@ -5,6 +5,8 @@ not enter the key unless they change an actual input.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import platform
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,17 @@ from typing import Any
 from .hashing import hash_json_obj, hash_text
 
 LINEAGE_FIELDS = ("fold_id", "inner_fold_id", "refit_id", "trial_id", "run_id", "profile_hash_post_overlay")
+
+
+def accepted_lock_hash(root: Path) -> str:
+    """SHA-256 of the accepted ``uv.lock``; an explicit unavailable marker when none is accepted (never a guess).
+
+    A lock installed as a candidate (``QUANT_LOCK_CANDIDATE=1``) is not accepted until it passes verification on the target runtime.
+    """
+    lock = Path(root) / "uv.lock"
+    if os.environ.get("QUANT_LOCK_CANDIDATE") == "1" or not lock.exists():
+        return "unavailable:no_accepted_lock"
+    return "sha256:" + hashlib.sha256(lock.read_bytes()).hexdigest()
 
 
 def code_hash(package_dir: Path) -> str:

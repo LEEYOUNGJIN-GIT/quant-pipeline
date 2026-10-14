@@ -159,14 +159,13 @@ def evaluate(check_id: str, entry: dict[str, Any], results: dict[str, str], run_
 
 def lineage() -> dict[str, str]:
     from quant_pipeline.config import load_config
+    from quant_pipeline.dependency import accepted_lock_hash
     from quant_pipeline.fitstate import lineage_hashes
 
     cfg = load_config(ROOT / "configs" / "fixture_3asset.yaml")
     h = lineage_hashes(cfg, ROOT)
-    lock = ROOT / "uv.lock"
     return {"spec_hash": h["spec_hash"], "config_hash": h["base_profile_hash"], "data_manifest_hash": h["data_manifest_hash"],
-            "code_hash": h["code_hash"], "lock_hash": ("sha256:" + hashlib.sha256(lock.read_bytes()).hexdigest()) if lock.exists()
-            else "unavailable:no_accepted_lock"}
+            "code_hash": h["code_hash"], "lock_hash": accepted_lock_hash(ROOT)}
 
 
 def build_report(results: dict[str, str], registry: dict[str, dict[str, Any]], spec_ids: list[tuple[str, str]], run_id: str,

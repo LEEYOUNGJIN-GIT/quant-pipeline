@@ -20,6 +20,7 @@ from .checkpoints import CheckpointKey, CheckpointStore
 from .config import load_config
 from .data import load_initial_holdings, load_market_data
 from .decision import FixedRegimeSource
+from .dependency import accepted_lock_hash
 from .engine import Opening
 from .evaluation import BENCHMARK_IDS, Evaluator, OuterCarry
 from .fitstate import lineage_hashes
@@ -60,7 +61,7 @@ class FixturePipeline:
         hashes = lineage_hashes(self.cfg, self.root)
         self.hashes = hashes
         self.lineage = {"spec_hash": hashes["spec_hash"], "config_hash": hashes["base_profile_hash"],
-                        "data_manifest_hash": hashes["data_manifest_hash"], "lock_hash": "unavailable:no_accepted_lock",
+                        "data_manifest_hash": hashes["data_manifest_hash"], "lock_hash": accepted_lock_hash(self.root),
                         "code_hash": hashes["code_hash"]}
         cash, qty, asof = load_initial_holdings(self.cfg, self.root)
         self.opening = Opening(cash, qty, utc(asof))

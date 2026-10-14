@@ -6,6 +6,7 @@ preliminary child that must be refused before anything else runs. Nothing here r
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -113,9 +114,10 @@ def world(tmp_path_factory):
 def lineage():
     """Freshly computed for the verified tree (not stored in the snapshot), in the pipeline's lineage vocabulary."""
     h = lineage_hashes(load_config(ROOT / PROFILE), ROOT)
-    lock = ROOT / "uv.lock"
+    lock = ROOT / "uv.lock"  # written independently of the production helper: a candidate lock is not an accepted lock
+    accepted = lock.exists() and os.environ.get("QUANT_LOCK_CANDIDATE") != "1"
     return {"spec_hash": h["spec_hash"], "config_hash": h["base_profile_hash"], "data_manifest_hash": h["data_manifest_hash"],
-            "lock_hash": "unavailable:no_accepted_lock" if not lock.exists() else "unchecked", "code_hash": h["code_hash"]}
+            "lock_hash": ("sha256:" + hashlib.sha256(lock.read_bytes()).hexdigest()) if accepted else "unavailable:no_accepted_lock", "code_hash": h["code_hash"]}
 
 
 def test_the_denial_hook_is_proven_active_and_a_missing_hook_is_detected(world):

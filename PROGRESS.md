@@ -352,3 +352,13 @@ Still failing or partial, with causes:
 ### Phase 7 continuation: CI (2026-10-15)
 
 `.github/workflows/ci.yml` runs the spec 20.2 sequence on CPython 3.12: bootstrap uv (versions recorded), sync from the lock, static doctor, plan, after-plan doctor, fixture run, probe, `verify.py`, evidence upload. Third-party Actions are pinned to commit SHAs checked against upstream with `git ls-remote` (checkout v7.0.1, setup-python v7.0.0, upload-artifact v7.0.2). `uv.lock.candidate` (73 packages, resolved on the development PC for `requires-python >=3.12`) is **not an accepted lock**: CI installs it as a candidate (`QUANT_LOCK_CANDIDATE=1`), `verify.py` reports the lock check as failing for it by design, and it is renamed to `uv.lock` only after a CI run on the target runtime passes. No CI result is claimed until a real run exists.
+
+### First CI run and its repairs (2026-10-15)
+
+The first real GitHub Actions run (Linux, CPython 3.12.15) failed. Causes and fixes:
+1. Lint: seven `tools/*.py` files have a shebang but were committed from Windows as mode 100644 (ruff EXE001 on Linux). Fixed with executable bits in the index.
+2. Fixture lock: `fixture_generation.lock.json` recorded Python 3.13.4 and correctly refused a 3.12 environment (two tests). The recorded interpreter was changed to the specification's 3.12.15; this is a fourth disclosed rework event in the lock's `signoff` (only that field and the manifest's `generation_lock_hash` changed; regeneration under 3.12 reproduces every logical hash). CI now pins CPython 3.12.15.
+3. Lineage: the pipeline always recorded `lock_hash = unavailable:no_accepted_lock`; it now hashes an accepted `uv.lock` and keeps the marker for a candidate lock (`dependency.accepted_lock_hash`).
+4. Regression snapshot (two black-box tests): the Linux run's registry and path projections differed from the Windows snapshot, while a Windows run on 3.12 matches it exactly, so the difference is the operating system's numerical libraries, not the Python version. `tools/projection_diff.py` now prints how large the differences are in CI; the snapshot policy (per-platform snapshots versus a tolerance class) is decided after that evidence.
+
+Development now also runs on a locally installed CPython 3.12.15 (`.venv312`, created from the lock candidate), which reproduced items 1-3 before pushing.
