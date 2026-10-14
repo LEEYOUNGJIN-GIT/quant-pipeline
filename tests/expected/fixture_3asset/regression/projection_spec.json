@@ -1,0 +1,7 @@
+{
+ "excluded_fields": [],
+ "label": "reviewed_regression",
+ "lineage_policy": "compared with the hashes freshly computed for the verified tree",
+ "note": "production-dependent snapshot; never an independent oracle; every field of the projection is compared exactly",
+ "schema": "comparison-projection-1"
+}
