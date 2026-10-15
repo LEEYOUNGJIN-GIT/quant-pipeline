@@ -330,7 +330,8 @@ def data_fetch(
         assets = assets_from_manifest(root / cfg.data.universe_manifest)
         out = output_snapshot if output_snapshot.is_absolute() else root / output_snapshot
         report = collect(assets, fx_pair=cfg.fx.pair_id, rates_symbol=cfg.cash.source_id, collector=col, provider=prov, start=start, end=end,
-                         output=out, cache_root=root / col.cache_root, jitter_seed=cfg.reproducibility.random_streams.provider_jitter)
+                         output=out, cache_root=root / col.cache_root, jitter_seed=cfg.reproducibility.random_streams.provider_jitter,
+                         universe_source=root / cfg.data.universe_manifest)
     except (ValueError, OSError, SnapshotError) as e:
         typer.echo(f"data fetch failed: {e}", err=True)
         raise typer.Exit(2) from e

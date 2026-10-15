@@ -32,6 +32,22 @@ def validate_data(cfg: Config, root: Path) -> list[Result]:
     out.append(_r("files_present", not absent, "all present" if not absent else f"missing {absent}"))
     if absent:
         return out
+    if d.mode == "snapshot":  # spec 4.6: the pointer must resolve to the content-addressed, fully verified snapshot before anything is read
+        from .snapshot import SnapshotResolutionError, resolve_snapshot, scan_contamination
+
+        try:
+            snap = resolve_snapshot(cfg, root)
+        except SnapshotResolutionError as e:
+            out.append(_r("snapshot_resolved", False, str(e)))
+            return out
+        out.append(_r("snapshot_resolved", True, f"{snap.snapshot_id} at {snap.directory.name}"))
+        scan = scan_contamination(cfg, root, snap)
+        out.extend(_r(name, ok, detail) for name, ok, detail in scan)
+        if not all(ok for _, ok, _ in scan):
+            return out
+        from .snapshot import hydrate_universe
+
+        cfg = hydrate_universe(cfg, snap)  # the records the rest of the checks (and later the engine) use are the verified, hashed ones
 
     # manifest integrity and fixture/research isolation
     manifest = json.loads((root / d.manifest).read_text(encoding="utf-8"))

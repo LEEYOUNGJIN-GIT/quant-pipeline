@@ -58,6 +58,7 @@ SUPPORTED_ACTIONS = frozenset({"split", "cash_dividend"})
 SECRET_KEY = re.compile(r"(?i)(api[_-]?key|token|secret|passw(or)?d|authorization|credential|cookie)")
 SECRET_VALUE = re.compile(r"(?i)\b(api[_-]?key|token|secret|passw(?:or)?d|authorization|bearer)\b(\s*[=:]\s*|\s+)\S+")
 PLACEHOLDERS = ("<snapshot_id>", "{snapshot_id}")
+UNIVERSE_FILE, HOLDINGS_FILE = "universe.yaml", "initial_holdings.csv"
 
 
 # ----------------------------------------------------------------------------------------------------------- errors
@@ -464,8 +465,13 @@ def _validate(items_resp: list[tuple[Item, ProviderResponse | None]], assets: li
 
 def collect(assets: list[Asset], *, fx_pair: str, rates_symbol: str, collector: Collector, provider: Provider, start: str, end: str,
             output: Path, cache_root: Path, jitter_seed: int, clock: Callable[[], float] = time.monotonic,
-            sleep: Callable[[float], None] = time.sleep, now: Callable[[], str] | None = None) -> FetchReport:
-    """Fetch every capability for every asset, validate, and materialize ``output`` only on complete success."""
+            sleep: Callable[[float], None] = time.sleep, now: Callable[[], str] | None = None,
+            universe_source: Path | None = None, holdings_source: Path | None = None) -> FetchReport:
+    """Fetch every capability for every asset, validate, and materialize ``output`` only on complete success.
+
+    With ``universe_source`` the snapshot also carries ``universe.yaml`` and ``initial_holdings.csv`` (``holdings_source`` or the default
+    100 % KRW cash record), so that every file a research profile reads is covered by the manifest hash.
+    """
     now = now or (lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     if not collector.fail_on_partial:
         raise ValueError("spec 4.6: partial success is a failure; collector.fail_on_partial must be true")
@@ -487,10 +493,22 @@ def collect(assets: list[Asset], *, fx_pair: str, rates_symbol: str, collector: 
         if resp is not None and item.capability in SNAPSHOT_FILES:
             frames[SNAPSHOT_FILES[item.capability]].append(resp.payload)
     tables = {stem: (pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=SCHEMAS[stem][0])) for stem, parts in frames.items()}
-    return _materialize(report, tables, provider, output)
+    extra: dict[str, bytes] = {}
+    if universe_source is not None:
+        extra[UNIVERSE_FILE] = universe_source.read_bytes()
+        extra[HOLDINGS_FILE] = holdings_source.read_bytes() if holdings_source is not None else default_initial_holdings(assets, start).encode("utf-8")
+    return _materialize(report, tables, provider, output, extra)
 
 
-def _materialize(report: FetchReport, tables: dict[str, pd.DataFrame], provider: Provider, output: Path) -> FetchReport:
+def default_initial_holdings(assets: list[Asset], start: str, cash_krw: str = "1000000000.00") -> str:
+    """Spec 13/15 default: 100 % KRW cash, no risky positions, marked at the start of the collected range (OQ-038)."""
+    as_of = f"{start}T00:00:00Z"
+    rows = [f"CASH_KRW,0,KRW,{cash_krw},{as_of}"] + [f"{a.asset_id},0,{a.currency},,{as_of}" for a in assets]
+    return "asset_id,quantity,currency,cash_amount,as_of_utc\n" + "\n".join(rows) + "\n"
+
+
+def _materialize(report: FetchReport, tables: dict[str, pd.DataFrame], provider: Provider, output: Path,
+                 extra: dict[str, bytes] | None = None) -> FetchReport:
     tmp = output.parent / f".{output.name}.tmp-{os.getpid()}"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -501,6 +519,9 @@ def _materialize(report: FetchReport, tables: dict[str, pd.DataFrame], provider:
         path = tmp / f"{stem}.parquet"
         write_parquet_stable(df, path)
         files[path.name] = {"raw_sha256": raw_hash(path), "logical_sha256": logical_hash(path, keys), "rows": len(df)}
+    for name, data in (extra or {}).items():  # text inputs: raw and logical hashes coincide (as in the fixture manifest)
+        write_atomic(tmp / name, data)
+        files[name] = {"raw_sha256": raw_hash(tmp / name), "logical_sha256": raw_hash(tmp / name), "rows": data.count(b"\n")}
     manifest = {"manifest_version": 1, "snapshot_kind": "research", "provider": report.provider, "request": report.request, "files": files}
     snapshot_id = hash_json_obj(manifest)
     report.status, report.snapshot_id = "success", snapshot_id
@@ -545,6 +566,8 @@ def verify_snapshot(directory: Path) -> str:
             raise SnapshotError(f"{directory}: referenced file {name} is missing")
         if raw_hash(path) != meta["raw_sha256"]:
             raise SnapshotError(f"{directory}: raw hash mismatch for {name}")
+        if path.suffix != ".parquet":
+            continue  # text inputs: the raw hash above is also their logical hash
         keys = SCHEMAS[path.stem][1]
         if logical_hash(path, keys) != meta["logical_sha256"]:
             raise SnapshotError(f"{directory}: logical hash mismatch for {name}")
