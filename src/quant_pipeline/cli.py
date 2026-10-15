@@ -229,11 +229,23 @@ def plan(config: CONFIG_OPT, run_id: Annotated[str | None, typer.Option("--run-i
 
     root = repo_root.resolve()
     cfg = load_config(config)
+    window = None
     if cfg.data.mode != "fixture":
-        typer.echo("plan for snapshot (research) profiles needs the research row map, which is not implemented yet", err=True)
-        raise typer.Exit(2)
+        from .calendars import window_from_manifest
+        from .snapshot import SnapshotResolutionError, load_research_context
+
+        try:
+            cfg, snap = load_research_context(cfg, root)
+        except SnapshotResolutionError as e:
+            typer.echo(f"plan refused: {e}", err=True)
+            raise typer.Exit(2) from e
+        window = window_from_manifest(snap.manifest)
     cals = Calendars.load(list(cfg.calendars.required))
-    rm, _ = build_row_map(cfg, cals)
+    try:
+        rm, _ = build_row_map(cfg, cals, window)
+    except ValueError as e:
+        typer.echo(f"plan refused: {e}", err=True)
+        raise typer.Exit(2) from e
     manifest = build_split_manifest(cfg, cals, rm)
     plan_doc = build_compute_plan(cfg, manifest, enumerate_trials(cfg), lineage_hashes(cfg, root))
     path = write_plan(root / cfg.paths.output_root, run_id or "plan", plan_doc)

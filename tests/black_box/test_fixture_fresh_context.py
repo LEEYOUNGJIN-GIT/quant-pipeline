@@ -94,7 +94,7 @@ def build_root(dest: Path, *, with_verify: bool = False) -> Path:
     if (ROOT / "uv.lock").exists():  # spec 17.3: the fresh context receives the accepted lock (a candidate is flagged by the environment)
         shutil.copy(ROOT / "uv.lock", dest / "uv.lock")
     if with_verify:  # verify.py needs the checked-in test code and registry it maps onto; never the regeneration tools or prior outputs
-        for sub in ("unit", "golden", "integration"):
+        for sub in ("unit", "golden", "integration", "support"):
             shutil.copytree(ROOT / "tests" / sub, dest / "tests" / sub, ignore=ignore)
         for name in ("check_registry.py", "known_gaps.json"):
             shutil.copy(ROOT / "tests" / name, dest / "tests" / name)

@@ -7,6 +7,7 @@ adjusted to fit a plan.
 """
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import shutil
@@ -44,11 +45,19 @@ def refit_of(refits: tuple[int, ...], position: int) -> int:
 def build_compute_plan(cfg: Config, manifest: SplitManifest, design: TrialDesign, hashes: dict[str, str]) -> dict[str, Any]:
     refits = manifest.refit_positions
     n = manifest.n_positions
+    dpos = manifest.decision_positions  # decision rows are a subset of the model rows outside the fixture (spec 5.1)
+
+    def d_upto(last: int) -> int:  # decisions at model positions 1..last
+        return bisect.bisect_right(dpos, last)
+
+    def d_between(first: int, last: int) -> int:
+        return d_upto(last) - d_upto(first - 1)
+
     n_trials = len(design.trials)
     gammas = len({json.dumps(t["parameters"]["agents.defensive.overlay_gamma_candidates"]) for t in design.trials})
     inner = [(p.name, f.index, f.path_end) for p in manifest.passes for f in p.inner]
     committed = [(o.fold_id, o.test.start_pos, o.test.end_pos) for o in manifest.outer] + [("holdout", manifest.holdout.start_pos, manifest.holdout.end_pos)]
-    committed_decisions = sum(e - s + 1 for _, s, e in committed)
+    committed_decisions = sum(d_between(s, e) for _, s, e in committed)
     mults = len(cfg.costs.sensitivity_multipliers)
     attempts = cfg.compute_budget.max_solver_attempts_per_problem
 
@@ -64,18 +73,18 @@ def build_compute_plan(cfg: Config, manifest: SplitManifest, design: TrialDesign
                        + sum(len([r for r in refits if s <= r <= e]) for _, s, e in committed) * mults)
 
     # ---- calibration decisions (each needs one rolling-PCA evaluation, agents and an auxiliary min-variance solve) ------------
-    cal_contexts = {(r, u) for r in refits for u in range(1, r + 1)}
-    decision_contexts = {(refit_of(refits, p), p) for p in range(1, n + 1)}
+    cal_contexts = {(r, u) for r in refits for u in dpos if u <= r}
+    decision_contexts = {(refit_of(refits, p), p) for p in dpos}
     contexts = cal_contexts | decision_contexts
     aux_dedup = len(contexts)  # Diversification does not depend on gamma/lambda: one solve per (fit, position) context
-    aux_nosharing = (sum(sum(r for r in refits_upto(refits, e)) + e for _, _, e in inner) * n_trials
-                     + sum(sum(r for r in refits if s <= r <= e) + (e - s + 1) for _, s, e in committed) * mults)
-    rolling_dedup = n  # the rolling PCA share depends only on returns up to a cutoff: one evaluation per distinct cutoff
+    aux_nosharing = (sum(sum(d_upto(r) for r in refits_upto(refits, e)) + d_upto(e) for _, _, e in inner) * n_trials
+                     + sum(sum(d_upto(r) for r in refits if s <= r <= e) + d_between(s, e) for _, s, e in committed) * mults)
+    rolling_dedup = len(dpos)  # the rolling PCA share depends only on returns up to a cutoff: one evaluation per distinct cutoff
     rolling_nosharing = aux_nosharing
 
     # ---- allocation solves (trial-sensitive: never shared across unequal trial hashes) -----------------------------------------
-    alloc_dedup = n_trials * max(e for _, _, e in inner) + committed_decisions * mults
-    alloc_nosharing = n_trials * sum(e for _, _, e in inner) + committed_decisions * mults
+    alloc_dedup = n_trials * d_upto(max(e for _, _, e in inner)) + committed_decisions * mults
+    alloc_nosharing = n_trials * sum(d_upto(e) for _, _, e in inner) + committed_decisions * mults
 
     # ---- ledger replays ---------------------------------------------------------------------------------------------------
     n_bench = len(cfg.benchmarks.definitions)
@@ -114,10 +123,12 @@ def build_compute_plan(cfg: Config, manifest: SplitManifest, design: TrialDesign
         "bootstrap_shape": [cfg.bootstrap.replicates, cfg.bootstrap.expected_oos_rows or 0],
         "calibration_contexts": len(cal_contexts), "decision_contexts": len(decision_contexts), "distinct_contexts": len(contexts),
     }
+    if len(dpos) != n:  # recorded only where decisions are a proper subset of the model rows, so the fixture's plan hash is unchanged
+        graph["decision_rows"] = len(dpos)
     estimates = {
         "assumptions": "crude; recorded so a reviewer can contest them",
         "peak_memory_gib": round((n * 80_000 + len(refits) * BYTES_PER_FIT * 4) / 2**30 + 0.5, 3),
-        "disk_gib": round((n_checkpoints * (committed_decisions + n) * BYTES_PER_DECISION_ARTIFACTS / 50) / 2**30 + 0.1, 3),
+        "disk_gib": round((n_checkpoints * (committed_decisions + len(dpos)) * BYTES_PER_DECISION_ARTIFACTS / 50) / 2**30 + 0.1, 3),
     }
     body = {"schema": PLAN_SCHEMA, "profile": cfg.profile.name, "counts": counts, "total_optimizer_solves": total_solves, "graph": graph,
             "estimates": estimates, "operation_caps_from_plan": False,

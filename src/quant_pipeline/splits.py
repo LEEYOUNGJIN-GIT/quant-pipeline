@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from .calendars import Calendars, RowMap, fmt, parse_delay, utc
+from .calendars import Calendars, RowMap, fmt, holdout_rows, outer_fold_count, parse_delay, utc
 from .config import Config
 from .hashing import hash_json_obj
 
@@ -71,6 +71,12 @@ class SplitManifest:
     refit_positions: tuple[int, ...]
     n_positions: int
     hash: str
+    decisions: tuple[tuple[str, str, int, int], ...] = ()  # (decision_id, anchor session, model position, fit position); empty = every position decides
+
+    @property
+    def decision_positions(self) -> tuple[int, ...]:
+        """Model positions at which a decision is taken: every position when ``decisions`` is empty (the fixture), else the scheduled ones."""
+        return tuple(d[2] for d in self.decisions) if self.decisions else tuple(range(1, self.n_positions + 1))
 
     def path_endpoints(self) -> list[int]:
         return sorted({f.path_end for p in self.passes for f in p.inner})
@@ -86,12 +92,15 @@ def _block(name: str, start: int, end: int, cfg: Config, cals: Calendars, rm: Ro
     anchors = tuple(s.strftime("%Y-%m-%d") for s in rm.anchors if first_s <= s <= last_s)
     fence = cals.close("XNYS", last_s) + delay
     exch = [a.exchange for a in (cfg.universe.assets or [])]
+    if not exch:
+        raise ValueError("the universe records are not loaded (a snapshot profile needs snapshot.hydrate_universe first)")
     tails = []
     for ex in dict.fromkeys(exch):
         sess, _ = cals.next_close_after(ex, fence + latency)
         last = cals.cals[ex].session_offset(sess, cfg.decision_schedule.max_order_age_sessions)
         tails.append(cals.close(ex, last))
-    return Block(name, start, end, tuple(range(start, end + 1)), anchors, fmt(cals.close("XNYS", first_s) + delay), fmt(fence),
+    positions = tuple(p for p in rm.decision_positions if start <= p <= end)
+    return Block(name, start, end, positions, anchors, fmt(cals.close("XNYS", first_s) + delay), fmt(fence),
                  fmt(cals.close("XNYS", first_s) + delay), fmt(max(tails)))
 
 
@@ -104,13 +113,11 @@ def refit_schedule(cfg: Config, last_position: int) -> tuple[int, ...]:
 def build_split_manifest(cfg: Config, cals: Calendars, rm: RowMap) -> SplitManifest:
     ev, out = cfg.evaluation, cfg.evaluation.outer
     n = len(rm.eligible)
-    hold_rows = cfg.final_holdout.rows
-    if hold_rows is None:
-        raise NotImplementedError("fractional holdouts belong to the research snapshot (Phase 5.7)")
+    hold_rows = holdout_rows(cfg, n)
     pre = n - hold_rows
     purge, embargo = ev.purge.minimum_rows, ev.embargo_rows
     folds = []
-    for k in range(out.maximum_folds):
+    for k in range(outer_fold_count(cfg, n)):
         train_end = out.initial_train_rows + k * out.step_rows
         if train_end + out.test_rows > pre:
             raise ValueError("outer test overlaps the holdout")
@@ -135,7 +142,11 @@ def build_split_manifest(cfg: Config, cals: Calendars, rm: RowMap) -> SplitManif
             "outer": [[o.fold_id, o.train_end, o.test.start_pos, o.test.end_pos, list(o.test.valuation_sessions)] for o in folds],
             "holdout": [holdout.start_pos, holdout.end_pos, list(holdout.valuation_sessions)],
             "refits": list(refit_schedule(cfg, n))}
-    m = SplitManifest(tuple(passes), tuple(folds), holdout, refit_schedule(cfg, n), n, hash_json_obj(body))
+    refits = refit_schedule(cfg, n)
+    decisions = tuple((d.decision_id, d.session.strftime("%Y-%m-%d"), d.position, max(r for r in refits if r <= d.position)) for d in rm.decisions)
+    if decisions:  # many decisions -> one fit; stored only where decisions are a proper subset of the model rows (the fixture's hash is unchanged)
+        body["decisions"] = [list(d) for d in decisions]
+    m = SplitManifest(tuple(passes), tuple(folds), holdout, refits, n, hash_json_obj(body), decisions)
     validate_manifest(cfg, m)
     return m
 

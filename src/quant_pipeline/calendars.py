@@ -1,6 +1,8 @@
 """Official exchange calendars, execution closes and row ownership (spec 5.1, 5.1.1, 6.2)."""
 from __future__ import annotations
 
+import bisect
+import math
 from dataclasses import dataclass
 
 import exchange_calendars as xc
@@ -51,14 +53,29 @@ class Calendars:
 
 
 @dataclass(frozen=True)
+class DecisionRow:
+    """One scheduled decision (spec 5.1: decision rows are a separate indexed set that points to one fit)."""
+
+    decision_id: str
+    session: pd.Timestamp  # the XNYS anchor session of the decision cutoff
+    position: int  # the last eligible complete-case position at or before the anchor: the model row the decision may use
+    on_complete_case_row: bool  # False: the anchor is an XKRX-closed session, so the decision uses the previous model row
+
+
+@dataclass(frozen=True)
 class RowMap:
-    """Panel rows, complete-case rows, eligible (decision) rows and valuation owners are separate indexed sets."""
+    """Panel rows, complete-case rows, eligible (model) rows, decision rows and valuation owners are separate indexed sets.
+
+    ``eligible`` are the post-warmup complete-case sessions; a position is the 1-based index into it. ``decisions`` is empty when the
+    profile decides at every eligible row (the fixture): then every position is a decision and no other relationship is stored.
+    """
 
     anchors: pd.DatetimeIndex  # every XNYS anchor session in the decision window
     complete_case: tuple[pd.Timestamp, ...]
     warmup: tuple[pd.Timestamp, ...]
     eligible: tuple[pd.Timestamp, ...]
     owners: dict[str, tuple[pd.Timestamp, pd.Timestamp]]  # block -> (first, last) eligible session
+    decisions: tuple[DecisionRow, ...] = ()
 
     def position(self, session: pd.Timestamp) -> int:
         return self.eligible.index(session) + 1 if session in self.eligible else 0
@@ -66,11 +83,68 @@ class RowMap:
     def valuation_owner(self, session: pd.Timestamp) -> str:
         return next((k for k, (a, b) in self.owners.items() if a <= session <= b), "")
 
+    @property
+    def decision_positions(self) -> tuple[int, ...]:
+        return tuple(d.position for d in self.decisions) if self.decisions else tuple(range(1, len(self.eligible) + 1))
 
-def build_row_map(cfg: Config, cals: Calendars) -> tuple[RowMap, dict[str, pd.DatetimeIndex]]:
+
+def holdout_rows(cfg: Config, n_eligible: int) -> int:
+    """Rows of the sealed tail: explicit for ``tail_rows``; ``max(minimum_rows, ceil(fraction * n))`` for ``tail_fraction`` (OQ-041)."""
+    fh = cfg.final_holdout
+    if fh.split_mode == "tail_rows":
+        assert fh.rows is not None
+        return fh.rows
+    assert fh.fraction is not None
+    return max(fh.minimum_rows or 0, math.ceil(fh.fraction * n_eligible))
+
+
+def outer_fold_count(cfg: Config, n_eligible: int) -> int:
+    """The fixture runs exactly ``maximum_folds``; research derives the count from the data and never truncates to fit a ceiling."""
+    out = cfg.evaluation.outer
+    if cfg.data.fixture_window is not None:
+        return out.maximum_folds
+    pre = n_eligible - holdout_rows(cfg, n_eligible)
+    folds = (pre - out.initial_train_rows) // out.step_rows
+    if folds < 1:
+        raise ValueError(f"the snapshot has {n_eligible} eligible rows: {pre} before the holdout is fewer than {out.initial_train_rows} training rows "
+                         f"plus one {out.test_rows}-row test block")
+    if folds > out.maximum_folds:
+        raise ValueError(f"the snapshot requires {folds} outer folds but evaluation.outer.maximum_folds is {out.maximum_folds}; "
+                         "the plan fails instead of truncating time, folds or decisions")
+    return folds
+
+
+def research_warmup_rows(cfg: Config) -> int:
+    """Rows needed before the first model row (OQ-040): the largest of the panel, covariance and drawdown look-backs."""
+    return max(cfg.panel.minimum_daily_rows, cfg.covariance.lookback_rows, cfg.features.drawdown_window)
+
+
+def monthly_decisions(anchors: pd.DatetimeIndex, eligible: tuple[pd.Timestamp, ...]) -> tuple[DecisionRow, ...]:
+    """The first eligible canonical XNYS cutoff of each calendar month (spec 6.1); runtime gate failures advance within the month (OQ-040)."""
+    cc = set(eligible)
+    usable = [s for s in anchors if eligible[0] <= s <= eligible[-1]]
+    out: list[DecisionRow] = []
+    seen: set[str] = set()
+    for s in usable:
+        month = s.strftime("%Y%m")
+        if month in seen:
+            continue
+        seen.add(month)
+        out.append(DecisionRow(f"d{month}", s, bisect.bisect_right(eligible, s), s in cc))
+    return tuple(out)
+
+
+def window_from_manifest(manifest: dict) -> tuple[str, str]:
+    req = manifest["request"]
+    return req["start"], req["end"]
+
+
+def build_row_map(cfg: Config, cals: Calendars, window: tuple[str, str] | None = None) -> tuple[RowMap, dict[str, pd.DatetimeIndex]]:
     fw = cfg.data.fixture_window
     if fw is None:
-        raise NotImplementedError("row map for snapshot profiles arrives with the research snapshot (Phase 5)")
+        if window is None:
+            raise ValueError("a snapshot profile needs the collected window (the manifest's request start/end) to build its row map")
+        return _research_row_map(cfg, cals, *window)
     start, end = fw.seed_observation_start_session, fw.decision_end_session
     sess = {n: cals.sessions(n, start, end) for n in ("XKRX", "XNYS")}
     both = sess["XNYS"].intersection(sess["XKRX"])
@@ -78,9 +152,7 @@ def build_row_map(cfg: Config, cals: Calendars) -> tuple[RowMap, dict[str, pd.Da
     warm = fw.warmup_rows
     eligible = complete_case[warm:]
     out = cfg.evaluation.outer
-    hold = cfg.final_holdout.rows
-    if hold is None:
-        raise ValueError("fixture holdout needs an explicit row count")
+    hold = holdout_rows(cfg, len(eligible))
     bounds = {"outer1": (out.initial_train_rows + 1, out.initial_train_rows + out.test_rows),
               "outer2": (out.initial_train_rows + out.test_rows + 1, out.initial_train_rows + 2 * out.test_rows),
               "holdout": (len(eligible) - hold + 1, len(eligible))}
@@ -91,6 +163,24 @@ def build_row_map(cfg: Config, cals: Calendars) -> tuple[RowMap, dict[str, pd.Da
     want = (fw.xnys_anchor_rows, fw.complete_case_return_rows, fw.warmup_rows, fw.model_eligible_rows)
     if counts != want:
         raise ValueError(f"fixture geometry mismatch: got {counts}, profile declares {want}")
+    return rm, sess
+
+
+def _research_row_map(cfg: Config, cals: Calendars, start: str, end: str) -> tuple[RowMap, dict[str, pd.DatetimeIndex]]:
+    sess = {n: cals.sessions(n, start, end) for n in ("XKRX", "XNYS")}
+    both = sess["XNYS"].intersection(sess["XKRX"])
+    complete_case = tuple(both[1:])
+    warm = research_warmup_rows(cfg)
+    eligible = complete_case[warm:]
+    if not eligible:
+        raise ValueError(f"{len(complete_case)} complete-case rows do not exceed the {warm}-row warmup")
+    out, n = cfg.evaluation.outer, len(eligible)
+    folds, hold = outer_fold_count(cfg, n), holdout_rows(cfg, n)
+    bounds = {f"outer{k}": (out.initial_train_rows + (k - 1) * out.step_rows + 1, out.initial_train_rows + (k - 1) * out.step_rows + out.test_rows)
+              for k in range(1, folds + 1)}
+    bounds["holdout"] = (n - hold + 1, n)
+    owners = {k: (eligible[lo - 1], eligible[hi - 1]) for k, (lo, hi) in bounds.items()}
+    rm = RowMap(sess["XNYS"], complete_case, complete_case[:warm], eligible, owners, monthly_decisions(sess["XNYS"], eligible))
     return rm, sess
 
 

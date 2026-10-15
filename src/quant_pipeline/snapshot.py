@@ -78,6 +78,30 @@ def hydrate_universe(cfg: Config, snap: ResolvedSnapshot) -> Config:
     return cfg.model_copy(update={"universe": cfg.universe.model_copy(update={"assets": assets})})
 
 
+def load_research_context(cfg: Config, root: Path) -> tuple[Config, ResolvedSnapshot]:
+    """Resolve, contamination-scan and hydrate: the only way a research profile gets its universe. Raises ``SnapshotResolutionError``."""
+    snap = resolve_snapshot(cfg, root)
+    failed = [f"{name}: {detail}" for name, ok, detail in scan_contamination(cfg, root, snap) if not ok]
+    if failed:
+        raise SnapshotResolutionError("contamination scan failed: " + "; ".join(failed))
+    return hydrate_universe(cfg, snap), snap
+
+
+def complete_case_coverage(cfg: Config, snap: ResolvedSnapshot, common_sessions: pd.DatetimeIndex) -> list[tuple[str, bool, str]]:
+    """Every risky asset needs an accepted total-return observation on every common XKRX/XNYS session (the first only seeds a level, the
+    rest are the complete-case return rows); nothing is dropped or filled silently."""
+    tr = pd.read_parquet(snap.files["prices_total_return"], columns=["instrument_id", "exchange_session"])
+    have = tr.groupby("instrument_id").exchange_session.agg(set)
+    out: list[tuple[str, bool, str]] = []
+    want = {s.strftime("%Y-%m-%d") for s in common_sessions}
+    missing = {a.asset_id: sorted(want - have.get(a.asset_id, set())) for a in (cfg.universe.assets or [])}
+    bad = {k: v for k, v in missing.items() if v}
+    out.append(("complete_case_coverage", not bad,
+                "every asset observes every complete-case session" if not bad else
+                "; ".join(f"{k}: {len(v)} sessions missing (first {v[0]})" for k, v in sorted(bad.items()))))
+    return out
+
+
 def scan_contamination(cfg: Config, root: Path, snap: ResolvedSnapshot) -> list[tuple[str, bool, str]]:
     """Fixture/research isolation (spec 12.6 'fixture/research contamination'): ``(check, ok, detail)`` rows; every one must pass."""
     out: list[tuple[str, bool, str]] = []
