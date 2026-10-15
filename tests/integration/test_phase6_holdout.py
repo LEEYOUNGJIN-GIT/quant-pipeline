@@ -66,8 +66,10 @@ def test_the_pre_holdout_report_passes_the_terminology_scan_and_states_the_requi
     text = (d / "report.md").read_text(encoding="utf-8")
     for must in ("KRW cash reference", "turnover-matched periodic equal weight", "turnover-matched staged-entry equal-weight hold",
                  "conventional buy-and-hold reference", "initial turnover exempt", "non-inferential", "selection_unstable",
-                 "below the fixture minima", "No accepted dependency lock", "Multiple-trial warning"):
+                 "below the fixture minima", "Multiple-trial warning"):
         assert must in text, must
+    lock_unaccepted = p.lineage["lock_hash"].startswith("unavailable")  # the degraded label tracks the lock state, in both directions
+    assert ("No accepted dependency lock" in text) == lock_unaccepted
 
 
 def test_opening_is_refused_without_the_flag_or_the_acknowledgement_and_computes_nothing(sealed):
