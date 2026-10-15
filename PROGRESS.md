@@ -362,3 +362,12 @@ The first real GitHub Actions run (Linux, CPython 3.12.15) failed. Causes and fi
 4. Regression snapshot (two black-box tests): the Linux run's registry and path projections differed from the Windows snapshot, while a Windows run on 3.12 matches it exactly, so the difference is the operating system's numerical libraries, not the Python version. `tools/projection_diff.py` now prints how large the differences are in CI; the snapshot policy (per-platform snapshots versus a tolerance class) is decided after that evidence.
 
 Development now also runs on a locally installed CPython 3.12.15 (`.venv312`, created from the lock candidate), which reproduced items 1-3 before pushing.
+
+### Regression snapshot rebased on Linux (2026-10-15)
+
+Decision (owner): the CI platform (Linux, CPython 3.12) is the reference for the production-dependent regression snapshot. `tests/expected/fixture_3asset/regression/projection.json` was regenerated with `tools/write_regression_snapshot.py` from a Linux run of `configs/fixture_3asset_aux1024.yaml`.
+
+Measured effect against the previous (Windows) snapshot: 18 of 48 registry scores differ (max absolute difference 1.7e-2, no eligibility flips); fills, NAV, ledger hashes, costs and benchmarks are identical; only the plan hashes differ. This is attributed to the operating system's numerical libraries (a Windows run on 3.12 matched the old snapshot exactly) and has not been isolated to a specific library.
+
+Consequence: a Windows development host no longer reproduces this snapshot; the two snapshot-comparison black-box tests are expected to fail there. The snapshot remains a reviewed regression artifact, never an independent oracle.
+Generated locally on CPython 3.12.3; the first CI run on 3.12.15 confirms whether the interpreter patch level matters.
