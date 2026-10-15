@@ -300,8 +300,14 @@ def test_independent_oracle_files_reproduce_exactly_in_the_fresh_context(world):
     # the HMM probe oracle consumes a production probe file and is compared in tests/golden/test_hmm_pipeline.py (also offline)
 
 
+# Research end-to-end modules (about 12 minutes together) are verified by the outer run; the fresh-context run omits them on purpose and the report must
+# say so: the only check that may be left unmatched is INV-DATA-001, and only because of exactly these files.
+HEAVY_RESEARCH_EVIDENCE = frozenset({"tests/integration/test_research_pipeline.py", "tests/integration/test_research_invariance.py"})
+
+
 def test_verify_py_runs_inside_the_network_denied_fresh_context_and_reports_the_same_lineage(world):
-    """Spec 17.3 runs ``verify.py`` in the fresh context. The V0 evidence files are run there; the black-box test itself is excluded (no recursion)."""
+    """Spec 17.3 runs ``verify.py`` in the fresh context. The V0 evidence files are run there, except the two heavy research modules named above;
+    the black-box test itself is excluded (no recursion)."""
     import importlib
     import sys as _sys
 
@@ -310,14 +316,20 @@ def test_verify_py_runs_inside_the_network_denied_fresh_context_and_reports_the_
     files = sorted({p.split("::")[0] for e in registry.values() if e["tier"] == "V0" for p in e["tests"]})
     root = world["verify_root"]
     assert not any("black_box" in f for f in files)
+    assert HEAVY_RESEARCH_EVIDENCE <= set(files)  # the omission below is of registered evidence, not of something that does not exist
+    run_files = [f for f in files if f not in HEAVY_RESEARCH_EVIDENCE]
     prefix, _ = netns_prefix()
     out = root / "outputs" / "verify_report.json"
-    cmd = [*prefix, sys.executable, str(root / "tools" / "verify.py"), "--run-id", "bb-verify", "--output", str(out), "--tier", "V0", "--allow-known-gaps", *files]
+    cmd = [*prefix, sys.executable, str(root / "tools" / "verify.py"), "--run-id", "bb-verify", "--output", str(out), "--tier", "V0", "--allow-known-gaps", *run_files]
     r = subprocess.run(cmd, cwd=root, env=child_env(root / "src"), capture_output=True, text=True, check=False, timeout=3000)
     report = json.loads(out.read_text(encoding="utf-8"))
-    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    assert report["registry_problems"] == [] and report["checks"] and report["known_gap_gate"]["ok"]
-    assert {c["id"] for c in report["checks"] if c["status"] not in ("pass", "partial")} == set()
+    assert report["registry_problems"] == [] and report["checks"]
+    others = {c["id"]: c for c in report["checks"] if c["status"] not in ("pass", "partial")}
+    assert set(others) == {"INV-DATA-001"}, r.stdout[-3000:] + r.stderr[-3000:]  # nothing else fails, is skipped or goes unmatched
+    assert others["INV-DATA-001"]["status"] == "registry_error" and others["INV-DATA-001"]["failed_tests"] == []
+    unmatched = others["INV-DATA-001"]["reasons"][0]
+    assert all(h in unmatched for h in HEAVY_RESEARCH_EVIDENCE) and unmatched.count("tests/") == len(HEAVY_RESEARCH_EVIDENCE)  # exactly the omitted files
+    assert r.returncode == 1 and report["known_gap_gate"]["other_non_passing"] == ["INV-DATA-001"]  # the gate says so instead of passing quietly
     assert report["lineage"] == {k: v for k, v in lineage_for_verify().items()}  # the same tree was verified
 
 
