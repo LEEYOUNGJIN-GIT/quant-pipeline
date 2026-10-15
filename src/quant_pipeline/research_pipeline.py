@@ -17,6 +17,7 @@ from .config import Config, load_config
 from .hmm_lane import HMMRegimeSource
 from .pipeline import FixturePipeline
 from .snapshot import ResolvedSnapshot, load_research_context
+from .trials import to_trial_params
 
 EVIDENCE_SYNTHETIC = "synthetic_engineering_test"
 EVIDENCE_RESEARCH = "research_snapshot"
@@ -64,11 +65,16 @@ class ResearchPipeline(FixturePipeline):
 
     # ------------------------------------------------------------------------------------------ evidence
     def _hmm_report(self) -> dict[str, Any]:
-        fits = sorted((fr.report() for fr in self.hmm.fits.values()), key=lambda r: (r["key"], r["n_states"]))
+        """Persisted evidence for the regime lane. It must not depend on which checkpoints this process happened to load, so it names a fixed set:
+        for each frozen winner's (component count, state count) pair, the fit at every refit up to the end of the last outer test."""
+        eng, m = self.ev.engine, self.manifest
+        last = m.outer[-1].test.end_pos
+        pairs = sorted({(o.winner_parameters["pca.n_components_candidates"],
+                         self.hmm.n_states_of(to_trial_params(self.cfg, o.winner_parameters))) for o in self.outcomes})
+        fits = [self.hmm.fitted(eng.fit(r, nc), ns).report() for r in m.refit_positions if r <= last for nc, ns in pairs]
         return {"evidence_class": self.evidence_class, "method": "hmmlearn EM -> export -> align -> owned forward filter (spec 7.5)",
-                "seed_stream": "hmm_em", "seed": self.cfg.reproducibility.random_streams.hmm_em, "n_fits": len(fits), "fits": fits,
-                "decisions_served": len(self.hmm.audit),
-                "scopes": {s: sum(1 for a in self.hmm.audit if a["scope"] == s) for s in ("train", "boundary", "oos")},
+                "seed_stream": "hmm_em", "seed": self.cfg.reproducibility.random_streams.hmm_em, "winner_pairs": [list(p) for p in pairs],
+                "n_fits": len(fits), "fits": fits, "scored_decisions": sum(o.test.n_decisions for o in m.outer),
                 "all_converged": all(f["converged"] for f in fits)}
 
     def _summary(self, runs) -> dict[str, Any]:
@@ -87,3 +93,35 @@ class ResearchPipeline(FixturePipeline):
 
     def projection(self, outcomes, outer, summary) -> dict[str, Any]:
         return {**super().projection(outcomes, outer, summary), "evidence_class": self.evidence_class}
+
+
+def main() -> int:
+    import argparse
+    import json
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run-id", required=True)
+    ap.add_argument("--out-root", required=True, type=Path)
+    ap.add_argument("--root", default=".", type=Path)
+    ap.add_argument("--config", default="configs/research_8_12asset.yaml")
+    ap.add_argument("--stop-after", type=int, default=None)
+    ap.add_argument("--projection-out", type=Path, default=None)
+    ap.add_argument("--allow-synthetic", action="store_true", help="engineering tests only: accept a snapshot labelled synthetic")
+    args = ap.parse_args()
+    from .pipeline import StopForTest
+
+    p = ResearchPipeline(args.root.resolve(), args.out_root, args.run_id, config=args.config, stop_after=args.stop_after,
+                         allow_synthetic=args.allow_synthetic)
+    try:
+        proj = p.run()
+    except StopForTest as e:
+        print(f"STOPPED: {e}")
+        return 75
+    if args.projection_out:
+        args.projection_out.write_text(json.dumps(proj, sort_keys=True), encoding="utf-8")
+    print(f"complete: computed={len(p.computed)} loaded={len(p.loaded)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

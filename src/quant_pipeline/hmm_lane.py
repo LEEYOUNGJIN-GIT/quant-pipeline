@@ -40,7 +40,7 @@ class FittedRegime:
 
     def report(self) -> dict:
         raw = self.pipeline.raw
-        return {"key": self.key, "n_states": self.n_states, "labels": list(self.labels), "converged": raw.converged, "fitter": raw.fitter,
+        return {"key": self.key, "refit_id": self.fit.refit_id, "n_components": len(self.fit.pca.loadings), "n_states": self.n_states, "labels": list(self.labels), "converged": raw.converged, "fitter": raw.fitter,
                 "permutation": list(self.pipeline.permutation), "start_fallback_stationary": self.pipeline.start_fallback_stationary,
                 "n_train_rows": len(self.train_cutoffs), "boundary_posterior": self.pipeline.boundary_posterior.tolist(),
                 "aligned_parameters": self.pipeline.aligned.to_json()}
