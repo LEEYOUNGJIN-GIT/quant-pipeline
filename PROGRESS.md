@@ -404,3 +404,18 @@ The recorded gap ("no remote, workflow or CI run exists yet") was stale: CI runs
 
 Consequences: the registry entry has no gap and the pin was removed from `tests/known_gaps.json`; strict verification run locally now shows INV-GOV-001 as failing with that explicit reason, and in CI it passes. Four known gaps remain pinned: INV-DATA-001, INV-DATA-002, INV-FETCH-001, INV-BLACKBOX-001.
 Evidence before CI confirms it: unit tests for the pass, mismatch, missing-id, local and not-a-repository cases, and a simulation over the real registry (local: fail; CI-like environment: pass). The first real CI run with this change is the final confirmation.
+
+### INV-DATA-002: corporate-action reconciliation levels 1-3 (2026-10-15)
+
+New `src/quant_pipeline/reconciliation.py` implements spec 4.3 and closes the recorded gap.
+
+- **Level 1** (`split_quantity`): a split must scale a held quantity to whole shares; the relative residual of `quantity x num == after x den` is compared with `split_relative_tolerance` and the run halts above it (the ledger replay now uses this function; a fractional share inside the tolerance rounds toward zero).
+- **Level 2**: per asset, gross total return is reconstructed from raw prices and the asset's own declared actions (`PROVIDER_CONVENTION`) and compared with the provider index. A per-event residual above `per_event_bps` or a rolling cumulative residual above `rolling_window_bps` invalidates the asset from the first offending event.
+- **Level 3**: a reference buy-and-hold position replayed with the ledger's quantity/cash mechanics, the gap to the adjusted series decomposed into dividend timing, non-reinvestment and money/lot rounding (FX timing, withholding tax and costs are zero by construction), the remainder judged by the same rule.
+- **Halt scope** (`halt_scope`): the fixture halts the whole run on any breach; research may exclude an asset only under a rule frozen in the snapshot manifest, and never while it is held, has a pending order, is required by a benchmark, or its removal breaches the universe minimum. A level-1 breach always halts.
+- **Wiring**: `data validate` reports the four checks; `FixturePipeline` raises `ReconciliationHalt` before loading market data or taking any decision.
+
+Fixture result: no breach; largest per-event residual 5e-5 bps and unexplained residual 5e-5 bps (index rounding); the dividend's ex-to-pay timing (37.5 bps) and non-reinvestment (6.6 bps) exceed both limits and are explained by the decomposition. A first version applied one asset's split to every asset (all residuals exactly 1e4 ln 2 bps); it was caught by running on the fixture and fixed by filtering actions per instrument; a test now pins that.
+
+Limits: the rolling-window length is not specified (20 returns, OQ-033); level 3 on a buy-and-hold reference adds little independent signal beyond level 2 (OQ-034); the provider convention is a code constant (OQ-035); the exclusion-rule path is exercised only with synthetic inputs because no research snapshot manifest exists yet (INV-DATA-001, INV-FETCH-001).
+Remaining known gaps: INV-DATA-001, INV-FETCH-001, INV-BLACKBOX-001.

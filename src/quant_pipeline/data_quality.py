@@ -90,6 +90,10 @@ def validate_data(cfg: Config, root: Path) -> list[Result]:
     out.append(_r("corporate_actions_declared_before_ex", bool((pd.to_datetime(ca.available_at_utc, utc=True)
                   < pd.to_datetime(ca.ex_timestamp_utc, utc=True)).all()), "available_at precedes ex timestamp"))
 
+    from .reconciliation import reconcile
+
+    out.extend(reconcile(cfg, root).results())  # spec 4.3 levels 1-3 and the halt scope
+
     try:
         cash, qty, as_of = load_initial_holdings(cfg, root)
         out.append(_r("initial_holdings", True, f"cash {cash}, quantities {qty}, as_of {as_of}"))

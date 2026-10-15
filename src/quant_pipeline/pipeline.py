@@ -26,6 +26,7 @@ from .evaluation import BENCHMARK_IDS, Evaluator, OuterCarry
 from .fitstate import lineage_hashes
 from .hashing import hash_json_obj, hash_text
 from .intervals import interval_report
+from .reconciliation import require_clean
 from .regimes import FixedRegimeTable
 from .reporting import build_context, render, scan_terminology
 from .splits import build_split_manifest
@@ -57,6 +58,7 @@ class FixturePipeline:
         self.store = CheckpointStore(out_root)
         self.cals = Calendars.load(["XKRX", "XNYS"])
         self.rm, self.sess = build_row_map(self.cfg, self.cals)
+        require_clean(self.cfg, self.root)  # spec 4.3: a reconciliation breach halts the entire run before any decision
         self.md = load_market_data(self.cfg, self.root)
         hashes = lineage_hashes(self.cfg, self.root)
         self.hashes = hashes

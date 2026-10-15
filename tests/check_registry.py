@@ -22,9 +22,8 @@ REGISTRY: dict[str, dict[str, Any]] = {
     "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_cli.py::test_data_validate"],
                      "gaps": ["the research profile cannot run: no immutable research snapshot, monthly row map or HMM decision lane exists"]},
     "INV-DATA-002": {"tier": "V0", "scope": "fixture_path", "tests": [U + "test_fixture_data.py::test_split_is_neutral", U + "test_fixture_data.py::test_raw_and_total_return",
-                                                                  U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate"],
-                     "gaps": [("spec 4.3 reconciliation levels 2 and 3 (provider total-return reconstruction; executable ledger versus adjusted research series) "
-                              "and their per-asset invalidation / halt scope are not implemented")]},
+                                                                  U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate",
+                                                                  U + "test_reconciliation.py"], "gaps": []},
     "INV-CAL-001": {"tier": "V0", "scope": "independent_oracle", "tests": [G + "test_oracle.py::test_calendar", I + "test_phase1_vs_oracle.py::test_calendar_table",
                                                                         U + "test_fixture_data.py::test_geometry"], "gaps": []},
     # ---- V1 ------------------------------------------------------------------------------------------------------
