@@ -68,6 +68,18 @@ jobs:
         if: always()
         run: uv run python tools/verify.py --run-id ci
 
+      - name: Emit this platform's regression projection (input to a reviewed snapshot regeneration)
+        if: always()
+        continue-on-error: true
+        env:
+          PYTHONHASHSEED: "0"
+        run: |
+          mkdir -p outputs/runs/ci
+          uv run python -m quant_pipeline.pipeline --run-id ci-projection --out-root outputs/ci_projection --root . \
+            --config configs/fixture_3asset_aux1024.yaml --projection-out outputs/runs/ci/projection.json
+          echo "PROJECTION_SHA256=$(sha256sum outputs/runs/ci/projection.json | cut -d' ' -f1)"
+          echo "PROJECTION_BEGIN"; cat outputs/runs/ci/projection.json; echo; echo "PROJECTION_END"
+
       - name: Explain differences from the regression snapshot (diagnostic)
         if: always()
         continue-on-error: true
@@ -82,5 +94,6 @@ jobs:
             outputs/verify_report.json
             outputs/capability_probe.json
             outputs/doctor.static.json
+            outputs/runs/ci/projection.json
             bootstrap_versions.txt
           if-no-files-found: warn
