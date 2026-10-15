@@ -70,6 +70,8 @@ def build_root(dest: Path) -> Path:
     (dest / "tools").mkdir()
     shutil.copy(ROOT / "tools" / "oracle_fixture.py", dest / "tools" / "oracle_fixture.py")
     shutil.copy(ROOT / "IMPLEMENTATION_SPEC.md", dest / "IMPLEMENTATION_SPEC.md")
+    if (ROOT / "uv.lock").exists():  # spec 17.3: the fresh context receives the accepted lock (a candidate is flagged by the environment)
+        shutil.copy(ROOT / "uv.lock", dest / "uv.lock")
     for f in (dest / "tests" / "expected").rglob("*"):  # expected files are read-only in the fresh context
         if f.is_file():
             f.chmod(stat.S_IREAD)
@@ -129,7 +131,8 @@ def test_the_denial_hook_is_proven_active_and_a_missing_hook_is_detected(world):
 def test_the_fresh_context_contains_only_permitted_inputs_and_imports_its_own_source(world):
     root = world["root"]
     names = {p.name for p in root.iterdir()}
-    assert names == {"src", "configs", "data", "tests", "tools", "IMPLEMENTATION_SPEC.md"}  # no outputs, caches, notebooks or overrides
+    allowed = {"src", "configs", "data", "tests", "tools", "IMPLEMENTATION_SPEC.md"} | ({"uv.lock"} if (ROOT / "uv.lock").exists() else set())
+    assert names == allowed  # no outputs, caches, notebooks or overrides
     r = subprocess.run([sys.executable, "-c", "import quant_pipeline,sys;print(quant_pipeline.__file__)"], cwd=root,
                        env=child_env(root / "src"), capture_output=True, text=True, check=False)
     assert Path(r.stdout.strip()).resolve().is_relative_to(root.resolve())

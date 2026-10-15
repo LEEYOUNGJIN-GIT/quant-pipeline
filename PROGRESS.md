@@ -371,3 +371,10 @@ Measured effect against the previous (Windows) snapshot: 18 of 48 registry score
 
 Consequence: a Windows development host no longer reproduces this snapshot; the two snapshot-comparison black-box tests are expected to fail there. The snapshot remains a reviewed regression artifact, never an independent oracle.
 Generated locally on CPython 3.12.3; the first CI run on 3.12.15 confirms whether the interpreter patch level matters.
+
+### Lock accepted (2026-10-15)
+
+CI run 12 (commit f5ebfd6, Linux, CPython 3.12.15, installed from the lock candidate): 486 passed, 1 expected failure, 0 failed; the only failing check was INV-ENV-001 because the lock was still a candidate. Per spec 2.2 ("accepted ... only after the target-VM verification passes") `uv.lock.candidate` was promoted to `uv.lock` unchanged (same bytes). From this commit CI installs the accepted lock and no longer sets `QUANT_LOCK_CANDIDATE`; the lineage `lock_hash` is the SHA-256 of `uv.lock`.
+
+Scope of the claim: the evidence is the CI runner as the target runtime (the repository's designated one, see `.github/workflows/ci.yml`). It is not a separate target-VM run; if a different VM is meant by the specification, the lock needs the same verification there.
+Remaining non-passing checks after this change are the partial ones listed above (INV-DATA-001/002, INV-FETCH-001, INV-BLACKBOX-001, INV-GOV-001).
