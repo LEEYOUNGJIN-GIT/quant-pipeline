@@ -109,3 +109,38 @@ def test_a_lock_candidate_run_never_reports_the_lock_as_accepted(monkeypatch, tm
     assert ok is False and "CANDIDATE" in note
     monkeypatch.delenv("QUANT_LOCK_CANDIDATE")
     assert verify.special_accepted_lock()[0] is (ROOT / "uv.lock").exists()
+
+
+def _gap_report(results, registry):
+    return verify.build_report(results, registry, SPEC, "t", run_specials=False)
+
+
+GAP_REG = {"INV-A-001": {**ENTRY, "gaps": ["not implemented"]}, "INV-B-001": {**ENTRY, "tier": "V1"}}
+ALLOWED = {"INV-A-001": "declared"}
+
+
+def test_the_known_gap_gate_accepts_only_pinned_partial_checks():
+    r = _gap_report(PASS, GAP_REG)
+    assert r["overall"] == "fail"  # strict verdict is unchanged
+    g = verify.known_gap_gate(r, ALLOWED)
+    assert g["ok"] and g["known_gaps_remaining"] == ["INV-A-001"] and g["unexpected_partial"] == []
+
+
+def test_the_known_gap_gate_rejects_an_unpinned_gap_a_failure_and_a_skip():
+    assert not verify.known_gap_gate(_gap_report(PASS, GAP_REG), {})["ok"]  # new gap not in the pinned list
+    failed = _gap_report({**PASS, "tests/unit/test_x.py::test_a": "failed"}, GAP_REG)
+    assert not verify.known_gap_gate(failed, ALLOWED)["ok"]
+    skipped = _gap_report({**PASS, "tests/unit/test_x.py::test_a": "skipped"}, GAP_REG)
+    assert not verify.known_gap_gate(skipped, ALLOWED)["ok"]
+    assert not verify.known_gap_gate(_gap_report(PASS, {**GAP_REG, "INV-B-001": {**GAP_REG["INV-B-001"], "tests": []}}), ALLOWED)["ok"]  # not covered
+
+
+def test_the_known_gap_gate_reports_pins_that_now_pass():
+    g = verify.known_gap_gate(_gap_report(PASS, REG), ALLOWED)
+    assert g["ok"] and g["pinned_but_now_passing"] == ["INV-A-001"]
+
+
+def test_the_shipped_pins_match_the_shipped_registry_gaps():
+    registry = verify.load_registry()
+    declared = {i for i, e in registry.items() if e.get("gaps")}
+    assert declared == set(verify.load_known_gaps())  # a gap added to the registry must be pinned (reviewed) on purpose

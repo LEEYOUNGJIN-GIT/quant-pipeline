@@ -4,6 +4,9 @@
 Runs the test suite once (or reuses a junit file), maps results onto every §17.2 check ID through ``tests/check_registry.py`` and
 writes ``outputs/verify_report.json`` atomically. A check passes only if all its evidence passed and it has no recorded gap.
 Exit code 0 only when every mandatory check passes; failed, skipped, partial, known-gap and uncovered checks all fail.
+``--allow-known-gaps`` (used by CI while the project is incomplete) relaxes only that last rule: the exit code is 0 when no check
+fails, is skipped, uncovered or newly partial and every ``partial`` check is pinned in ``tests/known_gaps.json``. The report's
+``overall`` stays strict and the remaining gaps are listed on every run.
 """
 from __future__ import annotations
 
@@ -200,6 +203,24 @@ def build_report(results: dict[str, str], registry: dict[str, dict[str, Any]], s
                                "reviewed_regression = production-dependent snapshot, never an independent oracle; kernel_unit = explicit inputs only"}
 
 
+KNOWN_GAPS_FILE = ROOT / "tests" / "known_gaps.json"
+
+
+def load_known_gaps(path: Path = KNOWN_GAPS_FILE) -> dict[str, str]:
+    return dict(json.loads(path.read_text(encoding="utf-8"))["partial"])
+
+
+def known_gap_gate(report: dict[str, Any], allowed: dict[str, str]) -> dict[str, Any]:
+    """Pass only when the sole non-passing checks are ``partial`` ones pinned in ``allowed`` (never fail/skip/uncovered/new gaps)."""
+    partial = sorted(c["id"] for c in report["checks"] if c["status"] == "partial")
+    other = sorted(c["id"] for c in report["checks"] if c["status"] not in PASSING and c["status"] != "partial")
+    unexpected = sorted(set(partial) - set(allowed))
+    resolved = sorted(set(allowed) - set(partial))  # pinned gaps that now pass: the pin should be removed
+    ok = not report["registry_problems"] and bool(report["checks"]) and not other and not unexpected
+    return {"ok": ok, "known_gaps_remaining": sorted(set(partial) & set(allowed)), "unexpected_partial": unexpected,
+            "other_non_passing": other, "pinned_but_now_passing": resolved}
+
+
 def write_atomic(path: Path, report: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.parent / f".{path.name}.tmp-{os.getpid()}"
@@ -221,6 +242,8 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=ROOT / "outputs" / "verify_report.json")
     ap.add_argument("--junit", type=Path, default=None, help="reuse an existing junit XML instead of running pytest")
     ap.add_argument("--tier", action="append", choices=["V0", "V1", "V2", "V3", "V4"], help="limit the report to these tiers")
+    ap.add_argument("--allow-known-gaps", action="store_true",
+                    help="exit 0 when the only non-passing checks are the partial ones pinned in tests/known_gaps.json (CI while incomplete)")
     ap.add_argument("pytest_args", nargs="*")
     args = ap.parse_args()
     junit = args.junit
@@ -232,6 +255,8 @@ def main() -> int:
         return 2
     spec = (ROOT / "IMPLEMENTATION_SPEC.md").read_text(encoding="utf-8")
     report = build_report(parse_junit(junit), load_registry(), spec_check_ids(spec), args.run_id, set(args.tier) if args.tier else None)
+    gate = known_gap_gate(report, load_known_gaps())
+    report["known_gap_gate"] = {**gate, "enabled": args.allow_known_gaps}
     report["generated_at_utc"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")  # volatile; excluded from any comparison
     write_atomic(args.output, report)
     s = report["summary"]
@@ -241,7 +266,17 @@ def main() -> int:
         if c["status"] != "pass":
             print(f"  {c['status']:13s} {c['id']:18s} {c['tier']}  {'; '.join(c['reasons'] + c['special'])[:150]}")
     print(f"report: {args.output}")
-    return 0 if report["overall"] == "pass" else 1
+    if report["overall"] == "pass":
+        return 0
+    if args.allow_known_gaps:
+        print(f"KNOWN GAPS REMAIN ({len(gate['known_gaps_remaining'])}): {', '.join(gate['known_gaps_remaining'])} - strict verification still FAILS; "
+              f"known-gap gate: {'ok' if gate['ok'] else 'NOT ok'}")
+        if gate["unexpected_partial"] or gate["other_non_passing"]:
+            print(f"  unexpected partial: {gate['unexpected_partial']}; other non-passing: {gate['other_non_passing']}")
+        if gate["pinned_but_now_passing"]:
+            print(f"  note: pinned but now passing (remove from tests/known_gaps.json): {gate['pinned_but_now_passing']}")
+        return 0 if gate["ok"] else 1
+    return 1
 
 
 if __name__ == "__main__":

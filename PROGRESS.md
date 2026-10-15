@@ -389,3 +389,11 @@ Decision (owner-approved): `projection_spec.json` now declares two tolerances an
 
 What is no longer protected: a change that alters only the plan hashes, or moves registry scores by less than 5e-2, while fills and NAV stay identical. The snapshot in the repository is the local Linux variant; any observed variant passes the new comparison in both directions.
 The CI `push` trigger on `impl` was removed (the pull_request run covers it) so each push runs and notifies once.
+
+### CI gate while the project is incomplete (2026-10-15)
+
+CI run 18 (487 passed, 0 failed, 1 expected failure) still exited 1 because `tools/verify.py` fails on any `partial` check and five checks declare unimplemented capabilities: INV-DATA-001 (research profile cannot run), INV-DATA-002 (reconciliation levels 2 and 3), INV-FETCH-001 (collector), INV-BLACKBOX-001 (Python-level network denial only, self-generated snapshot) and INV-GOV-001 (registry still records no CI run).
+
+Decision (owner-approved): `verify.py --allow-known-gaps`, used by CI only, exits 0 when no check fails, is skipped, uncovered or newly partial and every `partial` check is pinned in `tests/known_gaps.json`. The strict mode (default) is unchanged and still fails; `report.overall` stays `fail`; the remaining gaps and any pin that now passes are printed on every run; a test asserts that the pins equal the registry's declared gaps, so adding a gap needs an explicit, reviewed edit of the pin file.
+
+A green CI therefore means "no regressions and no undeclared gaps", NOT "the specification is implemented". Release acceptance must use the strict mode. INV-GOV-001's recorded gap predates CI and should be re-evaluated; it was left pinned rather than closed without evidence.
