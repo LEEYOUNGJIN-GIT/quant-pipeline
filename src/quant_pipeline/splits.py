@@ -44,7 +44,7 @@ class InnerFold:
     purge_positions: tuple[int, ...]
     embargo_positions: tuple[int, ...]
     path_end: int  # the isolated candidate path replays positions 1..path_end
-    executable_decisions: int  # decisions whose orders can execute inside the fence (the last decision is censored)
+    executable_decisions: int  # decisions whose orders can execute inside the fence (a decision at the block's last model row is censored)
     censored_decision: int
 
 
@@ -134,7 +134,7 @@ def build_split_manifest(cfg: Config, cals: Calendars, rm: RowMap) -> SplitManif
             block = _block(f"{name}-inner-{j + 1}", start, end, cfg, cals, rm)
             inner.append(InnerFold(j + 1, block, tuple(range(end + 1, end + 1 + g)) if j < ev.inner.folds - 1 else (),
                                    tuple(range(start - purge, start)), tuple(range(end + 1, end + 1 + g)), end,
-                                   block.n_decisions - 1, end))
+                                   sum(1 for q in block.decision_positions if q < block.end_pos), end))
         passes.append(SelectionPass(name, t, tuple(inner), refit_schedule(cfg, t)))
     holdout = _block("holdout", pre + 1, n, cfg, cals, rm)
     body = {"passes": [[p.name, p.train_end, [[f.validation.start_pos, f.validation.end_pos, f.path_end, list(f.purge_positions),

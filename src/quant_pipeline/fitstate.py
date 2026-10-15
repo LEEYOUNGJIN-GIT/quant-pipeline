@@ -14,7 +14,7 @@ import pandas as pd
 
 from . import SPEC_VERSION, asynchrony
 from .agents.base import AgentContext
-from .calendars import Calendars, fmt, parse_delay, utc
+from .calendars import Calendars, fmt, parse_delay, research_warmup_rows, utc
 from .config import Config
 from .covariance import CovarianceResult, fit_ledoit_wolf
 from .data import MarketData
@@ -152,7 +152,7 @@ def agent_context(cfg: Config, md: MarketData, cals: Calendars, sess: dict[str, 
         fold_id=fit.fold_id, refit_id=fit.refit_id, as_of=cut.to_pydatetime(), assets=assets, returns=returns,
         tradable=np.array([md.tradable(a, cut) for a in assets]), loadings=fit.pca.loadings,
         standardizer_mean=std.mean, standardizer_scale=std.scale, covariance=fit.covariance.matrix, max_weights=caps,
-        train_start_row=cfg.data.fixture_window.warmup_rows if cfg.data.fixture_window else 0, train_end_row=(len(returns) - 1) if calibration else n_fit - 1,
+        train_start_row=cfg.data.fixture_window.warmup_rows if cfg.data.fixture_window else research_warmup_rows(cfg), train_end_row=(len(returns) - 1) if calibration else n_fit - 1,
         illiquid_history=illiquid, row_cutoffs=tuple(cc.cutoff_utc))
 
 

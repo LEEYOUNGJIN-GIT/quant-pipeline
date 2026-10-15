@@ -19,10 +19,11 @@ REGISTRY: dict[str, dict[str, Any]] = {
                     "gaps": []},
     "INV-HASH-001": {"tier": "V0", "scope": "independent_oracle", "tests": [U + "test_independent_hashes.py", G + "test_jcs_rfc8785.py", U + "test_config.py"],
                      "gaps": []},
-    "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py",
+    "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py", U + "test_research_engine.py",
                                                                   U + "test_cli.py::test_data_validate"],
-                     "gaps": [("the research profile can be resolved, validated, row-mapped and planned, but cannot run: the engine still treats every model row as a decision "
-                              "and there is no HMM decision lane (regime.mode=hmm_filtered)")]},
+                     "gaps": [("the research profile can be resolved, validated, row-mapped, planned and its path engine decides at the scheduled decision rows, but it "
+                              "cannot run end to end: there is no HMM decision lane (regime.mode=hmm_filtered), the research trial space omits the PCA-component and "
+                              "gate/state dimensions, and no research pipeline assembles the stages")]},
     "INV-DATA-002": {"tier": "V0", "scope": "fixture_path", "tests": [U + "test_fixture_data.py::test_split_is_neutral", U + "test_fixture_data.py::test_raw_and_total_return",
                                                                   U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate",
                                                                   U + "test_reconciliation.py"], "gaps": []},

@@ -84,8 +84,15 @@ class RowMap:
         return next((k for k, (a, b) in self.owners.items() if a <= session <= b), "")
 
     @property
+    def decision_rows(self) -> tuple[DecisionRow, ...]:
+        """Every decision in order. The fixture decides at each eligible row, so its decision ``D001`` is model position 1, and so on."""
+        if self.decisions:
+            return self.decisions
+        return tuple(DecisionRow(f"D{i:03d}", s, i, True) for i, s in enumerate(self.eligible, start=1))
+
+    @property
     def decision_positions(self) -> tuple[int, ...]:
-        return tuple(d.position for d in self.decisions) if self.decisions else tuple(range(1, len(self.eligible) + 1))
+        return tuple(d.position for d in self.decision_rows)
 
 
 def holdout_rows(cfg: Config, n_eligible: int) -> int:

@@ -181,7 +181,7 @@ class FixturePipeline:
         is produced only when the holdout is opened."""
         from .diagnostics import scope_report
 
-        scopes = {"calibration": list(range(1, self.manifest.passes[-1].train_end + 1)),
+        scopes = {"calibration": [p for p in self.manifest.decision_positions if p <= self.manifest.passes[-1].train_end],
                   "outer_oos": [p for o in self.manifest.outer for p in o.test.decision_positions]}
         return scope_report(self.ev.engine, scopes, to_trial_params(self.cfg, final.winner_parameters))
 

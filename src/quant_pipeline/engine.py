@@ -110,7 +110,10 @@ class PathEngine:
         self.cfg, self.md, self.cals, self.sess, self.rm, self.regime, self.hashes = cfg, md, cals, sess, rm, regime, hashes
         self.caches = caches or Caches()
         self.static = build_events(cfg, cals, rm, md.actions, md.rates)
-        self.cutoffs = [decision_cutoff(cals, cfg, s) for s in rm.eligible]
+        self.cutoffs = [decision_cutoff(cals, cfg, s) for s in rm.eligible]  # one per MODEL row: fits and block fences are model-row events
+        self.decision_rows = {d.position: d for d in rm.decision_rows}  # decisions are a subset of the model rows outside the fixture
+        self.decision_cutoffs = {pos: decision_cutoff(cals, cfg, d.session) for pos, d in self.decision_rows.items()}
+        self.decision_positions = tuple(self.decision_rows)
         self.assets = tuple(a.asset_id for a in (cfg.universe.assets or []))
         self.exch = {a.asset_id: a.exchange for a in (cfg.universe.assets or [])}
         self.usd = np.array([a.currency == "USD" for a in (cfg.universe.assets or [])])
@@ -119,6 +122,10 @@ class PathEngine:
             if cfg.evaluation.continuous_refit.start_at_first_eligible_decision else ()
 
     # ------------------------------------------------------------------------------------------ shared, cached work
+    def decisions_upto(self, last: int) -> int:
+        """Number of decisions at model positions 1..last (equals ``last`` on the fixture)."""
+        return sum(1 for p in self.decision_positions if p <= last)
+
     def refit_position(self, position: int) -> int:
         return max(r for r in self.refits if r <= position)
 
@@ -142,14 +149,15 @@ class PathEngine:
             spec_hash=self.hashes["spec_hash"], code_hash_=self.hashes["code_hash"], lock_hash=None,
             data_manifest_hash=self.hashes["data_manifest_hash"], base_profile_hash=self.hashes["base_profile_hash"],
             asset_order=self.assets, information_cutoff_utc=fmt(self.cutoffs[refit_pos - 1]), fit_start_utc=fmt(fit.fit_start_utc),
-            fit_end_utc=fmt(fit.fit_end_utc), observation_set_hash=hash_json_obj(list(range(1, refit_pos + 1))),
+            fit_end_utc=fmt(fit.fit_end_utc), observation_set_hash=hash_json_obj([p for p, c in self.decision_cutoffs.items() if c <= fit.fit_end_utc]),
             upstream_content_hashes={"core_fit": fit.key}, relevant_parameter_subset=self._target_subset(trial), seed=None,
             solver_versions={}, numerical_options=default_numerical_options(),
             trial_influence={"influenced": True, "parameters": sorted(self._target_subset(trial)), "trial_hash": None})
         key = cache_key(fp)
         if key not in self.caches.calibrations:
             self.caches.calibrations[key] = calibrate_fold(
-                self.cfg, self.md, self.cals, self.sess, fit, self.regime, trial, self.cutoffs[:refit_pos],
+                self.cfg, self.md, self.cals, self.sess, fit, self.regime, trial,
+                [c for c in self.decision_cutoffs.values() if c <= fit.fit_end_utc],
                 self._initial_weights(), self.caches.agent_memo)
             self.caches.counts["calibrations"] += 1
         else:
@@ -164,8 +172,9 @@ class PathEngine:
     def target(self, position: int, trial: TrialParams, fit: FoldFit) -> DecisionTarget:
         key = (fit.key, position, json_key(self._target_subset(trial)))
         if key not in self.caches.targets:
-            ctx = agent_context(self.cfg, self.md, self.cals, self.sess, fit, self.cutoffs[position - 1])
-            self.caches.targets[key] = (decide(self.cfg, ctx, self.regime, trial, self.cutoffs[position - 1], self.caches.agent_memo), ctx)
+            cut = self.decision_cutoffs[position]
+            ctx = agent_context(self.cfg, self.md, self.cals, self.sess, fit, cut)
+            self.caches.targets[key] = (decide(self.cfg, ctx, self.regime, trial, cut, self.caches.agent_memo), ctx)
             self.caches.counts["targets"] += 1
         return self.caches.targets[key]
 
@@ -250,8 +259,10 @@ class PathEngine:
             fills.append(FillRecord(e.order_id, p["decision"], e.asset_id, fmt(e.ts), planned, realized, status, origin))
             return runner.step(e, quantity_override=realized)
 
-        for pos in range(start, end + 1):
-            cut = self.cutoffs[pos - 1]
+        in_block = [p for p in self.decision_positions if start <= p <= end]
+        for n_done, pos in enumerate(in_block):
+            dec_id = self.decision_rows[pos].decision_id
+            cut = self.decision_cutoffs[pos]
             drain(cut)
             runner.accrue_to(cut)
             nav_now = runner.nav_at(cut)
@@ -269,13 +280,13 @@ class PathEngine:
                                       (trial.lambda_track, trial.lambda_risk, trial.lambda_cost), self.rates[multiplier],
                                       tgt.combined.b_final, cfg.constraints.target_cash_floor, ctx.max_weights, self.usd,
                                       cfg.constraints.usd_exposure_limit, cfg.constraints.turnover_one_way_limit, ctx.tradable)
-                res: OptimizationResult = optimize(inp, cfg, previous_target=last_w, first_decision=(pos == start and carry is None))
+                res: OptimizationResult = optimize(inp, cfg, previous_target=last_w, first_decision=(n_done == 0 and carry is None))
                 attempts_total += len(res.attempts)
                 if res.halted or res.weights is None:
                     raise EngineHalt(f"position {pos}: {res.halt_reason}")
                 last_w = res.weights
                 plan = build_plan(cfg, md, cals, snap, res.weights, run_id=label, fold_id=fold_id, refit_id=f"r{rpos}",
-                                  decision_id=f"D{pos:03d}", trial_hash=trial_hash, decision_cutoff=cut,
+                                  decision_id=dec_id, trial_hash=trial_hash, decision_cutoff=cut,
                                   multiplier=Decimal(str(multiplier)))
                 a_bar, weights_out, b_final = tgt.a_bar.tolist(), res.weights.tolist(), tgt.combined.b_final
                 branch, n_attempts, terms = res.branch, len(res.attempts), res.terms
@@ -283,7 +294,7 @@ class PathEngine:
             else:
                 rpos = 0
                 ms = mark_state(cfg, md, cals, snap, cut)
-                plan, _ = policy.decide(DecisionInput(pos, snap, ms, len(heap), label, fold_id, f"D{pos:03d}", Decimal(str(multiplier)), cals))
+                plan, _ = policy.decide(DecisionInput(pos, snap, ms, len(heap), label, fold_id, dec_id, Decimal(str(multiplier)), cals))
                 a_bar = [float(x) for x in policy.target()]
                 weights_out = [float(Decimal(snap.holdings[a] + next((o.intended_trade_quantity for o in plan.orders if o.asset_id == a), 0))
                                      * ms.unit[a] / ms.nav) for a in self.assets]
@@ -300,7 +311,7 @@ class PathEngine:
                 ev = Event(ts, "buy_fill" if q > 0 else "sell_fill", self.exch[o.asset_id], o.asset_id, o.order_id,
                            {"quantity": q, "decision": pos, "max_execution_utc": o.max_execution_utc,
                             "origin": {"fold_id": fold_id, "refit_id": f"r{rpos}", "trial_hash": trial_hash,
-                                       "decision_id": f"D{pos:03d}"}})
+                                       "decision_id": dec_id}})
                 state["seq"] += 1
                 heapq.heappush(heap, (ev.key(), state["seq"], ev))
                 n_new += 1
@@ -310,7 +321,7 @@ class PathEngine:
                 None if terms is None else terms.contributions))
 
         if execute_until_end_valuation:
-            drain(self.cutoffs[end - 1])  # the block's information fence is the valuation at its last decision
+            drain(self.cutoffs[end - 1])  # the block's information fence is the valuation at its last MODEL row
         carry_out = PathCarry(runner.snapshot(), [h[2] for h in sorted(heap)], state["drained"], last_w,
                               None if policy is None else dict(policy.state))
         return PathResult(label, decisions, fills, nav, pd.DataFrame(rows), carry_out, runner.reconciliation, plans, attempts_total,
