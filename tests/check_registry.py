@@ -103,8 +103,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
     "INV-BLACKBOX-001": {"tier": "V4", "scope": "independent_oracle", "tests": [BB + "test_fixture_fresh_context.py", G + "test_hmm_pipeline.py::test_probe_in_a_fresh_subprocess"],
                          "gaps": [("the network-denial hook is Python-level only (no OS network namespace); verify.py is not executed inside the fresh context; "
                                   "the regression snapshot was generated from this implementation's own output (labeled reviewed_regression, not an oracle)")]},
-    "INV-GOV-001": {"tier": "V4", "scope": "static", "tests": [U + "test_capability.py"],
-                    "gaps": ["capability probe and truthful SHA audit are implemented, but no remote, workflow or CI run exists yet: the audit status is local_only"]},
+    "INV-GOV-001": {"tier": "V4", "scope": "static", "tests": [U + "test_capability.py"], "special": ["ci_provenance"], "gaps": []},
     "INV-VERIFY-001": {"tier": "V4", "scope": "static", "tests": [U + "test_verify_tool.py"], "special": ["self"], "gaps": []},
     # ---- documents -----------------------------------------------------------------------------------------------
     "INV-DOC-001": {"tier": "V0", "scope": "static", "tests": [U + "test_docs_contract.py"], "gaps": []},

@@ -4,8 +4,7 @@
   "INV-BLACKBOX-001": "Python-level network denial only; verify.py not run inside the fresh context; snapshot is self-generated",
   "INV-DATA-001": "research profile cannot run (no immutable research snapshot, monthly row map or HMM decision lane)",
   "INV-DATA-002": "spec 4.3 reconciliation levels 2 and 3 not implemented",
-  "INV-FETCH-001": "collector (data fetch), provider cache and fetch-failure report not implemented",
-  "INV-GOV-001": "capability probe and SHA audit exist; the registry still records no CI run (to be re-evaluated now that CI exists)"
+  "INV-FETCH-001": "collector (data fetch), provider cache and fetch-failure report not implemented"
  },
  "schema": "known-gaps-1"
 }

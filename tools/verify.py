@@ -83,6 +83,23 @@ def special_accepted_lock() -> tuple[bool, str]:
     return True, "uv.lock present: " + "sha256:" + hashlib.sha256(lock.read_bytes()).hexdigest()
 
 
+def special_ci_provenance(root: Path = ROOT, env: dict[str, str] | None = None) -> tuple[bool, str]:
+    """INV-GOV-001 evidence: this very run is a GitHub Actions run whose runner-reported SHA equals the checked-out HEAD (audit ``verified``).
+
+    A local run is not CI, so it cannot pass; it reports the explicit unavailability instead of fabricating provenance. Only the audit
+    status, the short SHA, the run id and the repository are echoed.
+    """
+    from quant_pipeline.capability import probe
+
+    r = probe(root, os.environ if env is None else env)
+    ci, audit = r["ci"], r["sha_audit"]
+    if not ci["in_ci"]:
+        return False, f"not a CI run ({ci['reason']}): provenance is explicitly unavailable, sha_audit={audit['status']}"
+    ok = audit["status"] == "verified" and bool(ci.get("run_id")) and bool(ci.get("repository"))
+    sha = (audit.get("ci_sha") or "")[:12]
+    return ok, f"sha_audit={audit['status']} sha={sha or None} run_id={ci.get('run_id')} repository={ci.get('repository')}"
+
+
 def special_spec_lint() -> tuple[bool, str]:
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "spec_lint.py"), "--output", str(Path(tempfile.mkdtemp()) / "lint.json")],
                        capture_output=True, text=True, cwd=ROOT, check=False)
@@ -108,7 +125,7 @@ def special_after_plan_gate() -> tuple[bool, str]:
         f" (failed: {', '.join(rep['failed'])})" if rep["failed"] else "")
 
 
-SPECIALS = {"accepted_lock": special_accepted_lock, "spec_lint": special_spec_lint, "after_plan_gate_on_shipped_profile": special_after_plan_gate}
+SPECIALS = {"accepted_lock": special_accepted_lock, "ci_provenance": special_ci_provenance, "spec_lint": special_spec_lint, "after_plan_gate_on_shipped_profile": special_after_plan_gate}
 
 
 # ------------------------------------------------------------------------------------------------ evaluation

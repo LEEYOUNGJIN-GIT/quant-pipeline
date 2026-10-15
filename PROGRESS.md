@@ -397,3 +397,10 @@ CI run 18 (487 passed, 0 failed, 1 expected failure) still exited 1 because `too
 Decision (owner-approved): `verify.py --allow-known-gaps`, used by CI only, exits 0 when no check fails, is skipped, uncovered or newly partial and every `partial` check is pinned in `tests/known_gaps.json`. The strict mode (default) is unchanged and still fails; `report.overall` stays `fail`; the remaining gaps and any pin that now passes are printed on every run; a test asserts that the pins equal the registry's declared gaps, so adding a gap needs an explicit, reviewed edit of the pin file.
 
 A green CI therefore means "no regressions and no undeclared gaps", NOT "the specification is implemented". Release acceptance must use the strict mode. INV-GOV-001's recorded gap predates CI and should be re-evaluated; it was left pinned rather than closed without evidence.
+
+### INV-GOV-001 closed with CI evidence (2026-10-15)
+
+The recorded gap ("no remote, workflow or CI run exists yet") was stale: CI runs exist and the probe step already reported `sha audit: verified; ci: True`. The spec's minimum evidence is "probe result and verified/null SHA audit", so `tools/verify.py` now checks it itself (special `ci_provenance`): it passes only when the verification run is a GitHub Actions run (`GITHUB_ACTIONS=true`) whose runner-reported SHA equals the checked-out HEAD (audit `verified`) and the run id and repository are present. A local run cannot pass: it reports `sha_audit=local_only` and "provenance is explicitly unavailable" (never fabricated), a SHA mismatch or a missing run id fails.
+
+Consequences: the registry entry has no gap and the pin was removed from `tests/known_gaps.json`; strict verification run locally now shows INV-GOV-001 as failing with that explicit reason, and in CI it passes. Four known gaps remain pinned: INV-DATA-001, INV-DATA-002, INV-FETCH-001, INV-BLACKBOX-001.
+Evidence before CI confirms it: unit tests for the pass, mismatch, missing-id, local and not-a-repository cases, and a simulation over the real registry (local: fail; CI-like environment: pass). The first real CI run with this change is the final confirmation.

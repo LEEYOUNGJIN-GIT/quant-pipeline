@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -144,3 +146,37 @@ def test_the_shipped_pins_match_the_shipped_registry_gaps():
     registry = verify.load_registry()
     declared = {i for i, e in registry.items() if e.get("gaps")}
     assert declared == set(verify.load_known_gaps())  # a gap added to the registry must be pinned (reviewed) on purpose
+
+
+GIT = shutil.which("git")
+
+
+def _repo(tmp_path):
+    subprocess.run([GIT, "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "f").write_text("x", encoding="utf-8")
+    subprocess.run([GIT, "add", "f"], cwd=tmp_path, check=True)
+    subprocess.run([GIT, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "m"], cwd=tmp_path, check=True)
+    return subprocess.run([GIT, "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+
+@pytest.mark.skipif(GIT is None, reason="git is required")
+def test_ci_provenance_passes_only_for_a_verified_ci_run(tmp_path):
+    head = _repo(tmp_path)
+    env = {"GITHUB_ACTIONS": "true", "GITHUB_SHA": head, "GITHUB_RUN_ID": "7", "GITHUB_REPOSITORY": "o/r", "GITHUB_WORKFLOW": "w"}
+    ok, note = verify.special_ci_provenance(tmp_path, env)
+    assert ok and "verified" in note and "run_id=7" in note
+    assert not verify.special_ci_provenance(tmp_path, {**env, "GITHUB_SHA": "b" * 40})[0]  # runner SHA differs from HEAD
+    assert not verify.special_ci_provenance(tmp_path, {k: v for k, v in env.items() if k != "GITHUB_RUN_ID"})[0]
+    assert not verify.special_ci_provenance(tmp_path, {k: v for k, v in env.items() if k != "GITHUB_REPOSITORY"})[0]
+
+
+@pytest.mark.skipif(GIT is None, reason="git is required")
+def test_ci_provenance_is_explicitly_unavailable_in_a_local_run_and_never_fabricated(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    head = _repo(repo)
+    ok, note = verify.special_ci_provenance(repo, {"GITHUB_SHA": head, "GITHUB_RUN_ID": "7", "GITHUB_REPOSITORY": "o/r"})  # no GITHUB_ACTIONS
+    assert not ok and "not a CI run" in note and "unavailable" in note
+    bare = tmp_path / "not_a_repo"  # a sibling, not inside the repository
+    bare.mkdir()  # CI-looking environment, but the directory has no HEAD to compare with: unverifiable, not verified
+    assert not verify.special_ci_provenance(bare, {"GITHUB_ACTIONS": "true", "GITHUB_SHA": head, "GITHUB_RUN_ID": "7", "GITHUB_REPOSITORY": "o/r"})[0]
