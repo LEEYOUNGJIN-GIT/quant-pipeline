@@ -419,3 +419,7 @@ Fixture result: no breach; largest per-event residual 5e-5 bps and unexplained r
 
 Limits: the rolling-window length is not specified (20 returns, OQ-033); level 3 on a buy-and-hold reference adds little independent signal beyond level 2 (OQ-034); the provider convention is a code constant (OQ-035); the exclusion-rule path is exercised only with synthetic inputs because no research snapshot manifest exists yet (INV-DATA-001, INV-FETCH-001).
 Remaining known gaps: INV-DATA-001, INV-FETCH-001, INV-BLACKBOX-001.
+
+## INV-FETCH-001 — collector (2026-10-15)
+
+`quant-pipeline data fetch` (`collector.py`): provider interface with explicit capabilities, content-addressed provider cache (key per spec 4.6), rate limiter, bounded retry with deterministic jitter from `provider_jitter`, schema/availability/license/raw-vs-total-return validation, atomic snapshot materialization with `fetch_report.json`, failure report beside the target, partial success treated as failure, credentials redacted. Offline `LocalFilesProvider` is the only validated provider; `yfinance` is explicitly unsupported (OQ-036). Conventions: OQ-037. Evidence: `tests/unit/test_collector.py` (31 tests). Known gaps remaining: INV-DATA-001, INV-BLACKBOX-001.

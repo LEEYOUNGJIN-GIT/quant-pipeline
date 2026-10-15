@@ -302,5 +302,46 @@ def data_validate(config: CONFIG_OPT, repo_root: Annotated[Path, typer.Option("-
     raise typer.Exit(1 if failed else 0)
 
 
+@data_app.command("fetch")
+def data_fetch(
+    config: CONFIG_OPT,
+    provider: Annotated[str, typer.Option("--provider", help="yfinance (explicitly unsupported in this build) or local_files")],
+    start: Annotated[str, typer.Option("--start", help="YYYY-MM-DD")],
+    end: Annotated[str, typer.Option("--end", help="YYYY-MM-DD")],
+    output_snapshot: Annotated[Path, typer.Option("--output-snapshot", help="snapshot directory; <snapshot_id> is replaced by the manifest id")],
+    source_dir: Annotated[Path | None, typer.Option("--source-dir", help="local_files only: directory of canonical parquet files")] = None,
+    license_text: Annotated[str | None, typer.Option("--license", help="local_files only: license of the source data")] = None,
+    repo_root: Annotated[Path, typer.Option("--repo-root", hidden=True)] = Path(),
+) -> None:
+    """Optional collector (spec 4.6): fetch, cache, validate and materialize an immutable research snapshot. Partial success is a failure."""
+    from .collector import SnapshotError, assets_from_manifest, collect, make_provider
+
+    cfg = load_config(config)
+    root = repo_root.resolve()
+    col = cfg.data.collector
+    if cfg.data.mode != "snapshot" or col is None or not cfg.data.universe_manifest:
+        typer.echo("data fetch needs a snapshot profile with data.collector and data.universe_manifest", err=True)
+        raise typer.Exit(2)
+    if not col.enabled:
+        typer.echo("the collector is disabled in this profile (data.collector.enabled: false); enable it explicitly to fetch", err=True)
+        raise typer.Exit(2)
+    try:
+        prov = make_provider(provider, source_dir=source_dir, license=license_text)
+        assets = assets_from_manifest(root / cfg.data.universe_manifest)
+        out = output_snapshot if output_snapshot.is_absolute() else root / output_snapshot
+        report = collect(assets, fx_pair=cfg.fx.pair_id, rates_symbol=cfg.cash.source_id, collector=col, provider=prov, start=start, end=end,
+                         output=out, cache_root=root / col.cache_root, jitter_seed=cfg.reproducibility.random_streams.provider_jitter)
+    except (ValueError, OSError, SnapshotError) as e:
+        typer.echo(f"data fetch failed: {e}", err=True)
+        raise typer.Exit(2) from e
+    c = report.cache
+    typer.echo(f"data fetch: {report.status} ({len(report.items)} requests, cache hits {c['hits']}, misses {c['misses']})")
+    for f in report.failures():
+        typer.echo(f"FAIL {f['capability']}/{f['symbol']}: {f['kind']} after {f['attempts']} attempt(s): {f['error']}")
+    if report.status == "success":
+        typer.echo(f"snapshot {report.snapshot_id}")
+    raise typer.Exit(0 if report.status == "success" else 1)
+
+
 if __name__ == "__main__":
     app()
