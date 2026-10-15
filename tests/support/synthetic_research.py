@@ -37,12 +37,15 @@ def asset_records() -> list[dict]:
 
 
 def _price_rows(cals: Calendars, ex: str, ccy: str, unit: str, ids: list[str], start: str, end: str, rng: np.random.Generator, field: str,
-                paths: dict[str, np.ndarray] | None) -> tuple[list[dict], dict[str, np.ndarray]]:
+                paths: dict[str, np.ndarray] | None, perturb_after: str | None = None) -> tuple[list[dict], dict[str, np.ndarray]]:
     sess = cals.sessions(ex, start, end)
     rows, out = [], {}
     for a in ids:
         if paths is None:
-            r = rng.normal(0.0003, 0.012, size=len(sess))
+            r = rng.normal(0.0003, 0.012, size=len(sess))  # the draw is identical with and without a perturbation
+            if perturb_after is not None:  # a deterministic rewrite of every return observed after the given session date
+                later = np.array([x.strftime("%Y-%m-%d") > perturb_after for x in sess])
+                r = r + later * (0.015 * np.sin(np.arange(len(sess)) * 1.3 + 0.9 * ids.index(a)) + 0.004)
             level = 100.0 * np.exp(np.cumsum(r))
         else:
             level = paths[a]
@@ -57,12 +60,12 @@ def _price_rows(cals: Calendars, ex: str, ccy: str, unit: str, ids: list[str], s
     return rows, out
 
 
-def source_tables(start: str, end: str) -> dict[str, pd.DataFrame]:
+def source_tables(start: str, end: str, perturb_after: str | None = None) -> dict[str, pd.DataFrame]:
     cals = Calendars.load(["XKRX", "XNYS"])
     rng = np.random.default_rng(SEED)
     raw_rows, tr_rows = [], []
     for ids, ex, ccy, unit in ((KRX_IDS, "XKRX", "KRW", "KRW/share"), (NYSE_IDS, "XNYS", "USD", "USD/share")):
-        rows, paths = _price_rows(cals, ex, ccy, unit, ids, start, end, rng, "close", None)
+        rows, paths = _price_rows(cals, ex, ccy, unit, ids, start, end, rng, "close", None, perturb_after)
         raw_rows += rows
         trs, _ = _price_rows(cals, ex, ccy, "index", ids, start, end, rng, "total_return_index", paths)
         tr_rows += trs
@@ -70,30 +73,31 @@ def source_tables(start: str, end: str) -> dict[str, pd.DataFrame]:
     fx = []
     level = 1300.0
     stamps = sorted({cals.close(ex, s) for ex in ("XKRX", "XNYS") for s in cals.sessions(ex, start, end)})
+    shift = lambda day: 0.002 if perturb_after is not None and day > perturb_after else 0.0
     for close in stamps:
-        level *= float(np.exp(rng.normal(0.0, 0.003)))
+        level *= float(np.exp(rng.normal(0.0, 0.003) + shift(close.strftime("%Y-%m-%d"))))
         fx.append({"pair_id": "USDKRW", "event_timestamp_utc": fmt(close), "available_at_utc": fmt(close + pd.Timedelta(minutes=15)),
                    "value": round(level, 2), "quote_convention": "KRW_per_USD", "source_id": "synthetic-research"})
     for d in pd.bdate_range(start, end):  # a midday quote on weekdays when both exchanges are closed bridges multi-day holidays
         noon = pd.Timestamp(f"{d:%Y-%m-%d}T12:00:00Z")
         if not any(abs((noon - t).total_seconds()) < 36 * 3600 for t in stamps if t.date() == d.date()):
-            level *= float(np.exp(rng.normal(0.0, 0.003)))
+            level *= float(np.exp(rng.normal(0.0, 0.003) + shift(f"{d:%Y-%m-%d}")))
             fx.append({"pair_id": "USDKRW", "event_timestamp_utc": fmt(noon), "available_at_utc": fmt(noon + pd.Timedelta(minutes=15)),
                        "value": round(level, 2), "quote_convention": "KRW_per_USD", "source_id": "synthetic-research"})
     fx.sort(key=lambda r: r["event_timestamp_utc"])
     days = pd.bdate_range(start, end)
     rates = [{"rate_date": d.strftime("%Y-%m-%d"), "event_timestamp_utc": f"{d:%Y-%m-%d}T00:00:00Z", "available_at_utc": f"{d:%Y-%m-%d}T00:00:00Z",
-              "annual_rate": 0.03, "quote_basis": "annual_simple", "day_count": "ACT/365F", "source_id": "krw_rfr_public"} for d in days]
+              "annual_rate": 0.03 + (0.05 if perturb_after is not None and f"{d:%Y-%m-%d}" > perturb_after else 0.0), "quote_basis": "annual_simple", "day_count": "ACT/365F", "source_id": "krw_rfr_public"} for d in days]
     return {"prices_raw": pd.DataFrame(raw_rows), "prices_total_return": pd.DataFrame(tr_rows), "corporate_actions": pd.DataFrame(columns=C.ACTION_COLUMNS),
             "fx_krw_per_usd": pd.DataFrame(fx), "rates_krw_rfr": pd.DataFrame(rates)}
 
 
 def build_research_repo(root: Path, start: str = "2016-01-04", end: str = "2023-12-29",
-                        mutate: Callable[[dict[str, pd.DataFrame]], None] | None = None) -> tuple[Path, str]:
+                        mutate: Callable[[dict[str, pd.DataFrame]], None] | None = None, perturb_after: str | None = None) -> tuple[Path, str]:
     """A repository root with the synthetic snapshot at data/snapshots/research/<id> and ``current`` pointing at it."""
     src = root / "source"
     src.mkdir(parents=True)
-    tables = source_tables(start, end)
+    tables = source_tables(start, end, perturb_after)
     if mutate is not None:
         mutate(tables)
     for stem, df in tables.items():
