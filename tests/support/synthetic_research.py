@@ -66,14 +66,21 @@ def source_tables(start: str, end: str) -> dict[str, pd.DataFrame]:
         raw_rows += rows
         trs, _ = _price_rows(cals, ex, ccy, "index", ids, start, end, rng, "total_return_index", paths)
         tr_rows += trs
-    fx_sess = cals.sessions("XNYS", start, end)
+    # FX trades every weekday (a quote at each XKRX and XNYS close), so an exchange holiday never leaves a quote older than the 72h limit
     fx = []
     level = 1300.0
-    for s in fx_sess:
+    stamps = sorted({cals.close(ex, s) for ex in ("XKRX", "XNYS") for s in cals.sessions(ex, start, end)})
+    for close in stamps:
         level *= float(np.exp(rng.normal(0.0, 0.003)))
-        close = cals.close("XNYS", s)
         fx.append({"pair_id": "USDKRW", "event_timestamp_utc": fmt(close), "available_at_utc": fmt(close + pd.Timedelta(minutes=15)),
                    "value": round(level, 2), "quote_convention": "KRW_per_USD", "source_id": "synthetic-research"})
+    for d in pd.bdate_range(start, end):  # a midday quote on weekdays when both exchanges are closed bridges multi-day holidays
+        noon = pd.Timestamp(f"{d:%Y-%m-%d}T12:00:00Z")
+        if not any(abs((noon - t).total_seconds()) < 36 * 3600 for t in stamps if t.date() == d.date()):
+            level *= float(np.exp(rng.normal(0.0, 0.003)))
+            fx.append({"pair_id": "USDKRW", "event_timestamp_utc": fmt(noon), "available_at_utc": fmt(noon + pd.Timedelta(minutes=15)),
+                       "value": round(level, 2), "quote_convention": "KRW_per_USD", "source_id": "synthetic-research"})
+    fx.sort(key=lambda r: r["event_timestamp_utc"])
     days = pd.bdate_range(start, end)
     rates = [{"rate_date": d.strftime("%Y-%m-%d"), "event_timestamp_utc": f"{d:%Y-%m-%d}T00:00:00Z", "available_at_utc": f"{d:%Y-%m-%d}T00:00:00Z",
               "annual_rate": 0.03, "quote_basis": "annual_simple", "day_count": "ACT/365F", "source_id": "krw_rfr_public"} for d in days]
@@ -98,7 +105,7 @@ def build_research_repo(root: Path, start: str = "2016-01-04", end: str = "2023-
     out = root / "data" / "snapshots" / "research" / "<snapshot_id>"
     report = C.collect(assets, fx_pair=cfg.fx.pair_id, rates_symbol="krw_rfr", collector=SETTINGS,
                        provider=C.LocalFilesProvider(src, "synthetic test data; no third-party rights"), start=start, end=end, output=out,
-                       cache_root=root / "cache", jitter_seed=1731, now=lambda: "2026-01-01T00:00:00Z", universe_source=universe)
+                       cache_root=root / "cache", jitter_seed=1731, now=lambda: "2026-01-01T00:00:00Z", universe_source=universe, synthetic=True)
     if report.status != "success":
         raise RuntimeError(f"synthetic snapshot failed: {report.issues}")
     sid = report.snapshot_id.removeprefix("sha256:")

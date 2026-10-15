@@ -31,6 +31,10 @@ class ResolvedSnapshot:
     files: dict[str, Path]  # configured role -> resolved path
     manifest: dict
 
+    @property
+    def synthetic(self) -> bool:
+        return self.manifest.get("synthetic") is True
+
 
 def configured_files(cfg: Config) -> dict[str, str]:
     d = cfg.data

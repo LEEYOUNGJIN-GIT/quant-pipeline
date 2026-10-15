@@ -20,9 +20,10 @@ REGISTRY: dict[str, dict[str, Any]] = {
     "INV-HASH-001": {"tier": "V0", "scope": "independent_oracle", "tests": [U + "test_independent_hashes.py", G + "test_jcs_rfc8785.py", U + "test_config.py"],
                      "gaps": []},
     "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py", U + "test_research_engine.py", U + "test_hmm_lane.py", U + "test_research_trials.py",
+                                                                  I + "test_research_pipeline.py",
                                                                   U + "test_cli.py::test_data_validate"],
-                     "gaps": [("the research profile can be resolved, validated, row-mapped, planned (trial space 5832), and its path engine decides at the scheduled "
-                              "decision rows with the HMM-filtered regime lane, but no research pipeline assembles the stages and no end-to-end research run exists")]},
+                     "gaps": [("the research pipeline runs end to end only as a reduced engineering test on a SYNTHETIC snapshot; the full research profile has never been "
+                              "executed (24 h compute budget, no licensed snapshot), so no research result exists")]},
     "INV-DATA-002": {"tier": "V0", "scope": "fixture_path", "tests": [U + "test_fixture_data.py::test_split_is_neutral", U + "test_fixture_data.py::test_raw_and_total_return",
                                                                   U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate",
                                                                   U + "test_reconciliation.py"], "gaps": []},

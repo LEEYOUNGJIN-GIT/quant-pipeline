@@ -19,7 +19,7 @@
 </head>
 <body>
 <h1>{{ title }}</h1>
-<p class="banner"><strong>Status: {{ status_banner }}</strong><br>Synthetic fixture data. Results demonstrate implementation properties only; they make no claim about any market, about future returns, or about statistical strength.</p>
+<p class="banner"><strong>Status: {{ status_banner }}</strong><br>{{ data_note }}</p>
 <p class="muted">Specification <code>{{ spec_version }}</code> · profile <code>{{ profile }}</code> · run <code>{{ run_id }}</code> · lock <code>{{ lineage.lock_hash }}</code> · final holdout: <strong>{{ holdout.status }}</strong></p>
 
 <h2>1. Costs and tax</h2>
@@ -73,6 +73,6 @@
 
 <h2>8. Degraded conditions and limitations</h2>
 <ul>{% for d in degraded %}<li>{{ d }}</li>{% endfor %}</ul>
-<p class="muted">The daily XNYS-anchored panel is an operational synchronization approximation; the fixture decision lane uses a fixed regime table; data are synthetic.</p>
+<p class="muted">The daily XNYS-anchored panel is an operational synchronization approximation; {{ limitation_regime }} {{ limitation_data }}</p>
 </body>
 </html>

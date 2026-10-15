@@ -235,3 +235,20 @@ def test_the_cli_exposes_the_resolution_failure_as_a_nonzero_exit(tmp_path):
     rates.write_bytes(rates.read_bytes() + b"x")
     r = CliRunner().invoke(app, ["data", "validate", "--config", str(ROOT / "configs" / "research_8_12asset.yaml"), "--repo-root", str(root)])
     assert r.exit_code != 0 and "snapshot_resolved" in r.output
+
+
+def test_a_snapshot_is_labelled_synthetic_only_when_the_collector_is_told_so(tmp_path):
+    root, _ = build_repo(tmp_path)
+    plain = resolve_snapshot(research_cfg(), root)
+    assert plain.synthetic is False and "synthetic" not in plain.manifest  # existing snapshot ids are not affected
+
+    sys_path = str(ROOT / "tests")
+    import sys
+
+    sys.path.insert(0, sys_path)
+    from support.synthetic_research import build_research_repo
+
+    other = tmp_path / "syn"
+    other.mkdir()
+    root2, _ = build_research_repo(other, start="2016-01-04", end="2016-03-31")
+    assert resolve_snapshot(research_cfg(), root2).synthetic is True

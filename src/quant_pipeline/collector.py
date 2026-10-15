@@ -466,7 +466,7 @@ def _validate(items_resp: list[tuple[Item, ProviderResponse | None]], assets: li
 def collect(assets: list[Asset], *, fx_pair: str, rates_symbol: str, collector: Collector, provider: Provider, start: str, end: str,
             output: Path, cache_root: Path, jitter_seed: int, clock: Callable[[], float] = time.monotonic,
             sleep: Callable[[float], None] = time.sleep, now: Callable[[], str] | None = None,
-            universe_source: Path | None = None, holdings_source: Path | None = None) -> FetchReport:
+            universe_source: Path | None = None, holdings_source: Path | None = None, synthetic: bool = False) -> FetchReport:
     """Fetch every capability for every asset, validate, and materialize ``output`` only on complete success.
 
     With ``universe_source`` the snapshot also carries ``universe.yaml`` and ``initial_holdings.csv`` (``holdings_source`` or the default
@@ -497,7 +497,7 @@ def collect(assets: list[Asset], *, fx_pair: str, rates_symbol: str, collector: 
     if universe_source is not None:
         extra[UNIVERSE_FILE] = universe_source.read_bytes()
         extra[HOLDINGS_FILE] = holdings_source.read_bytes() if holdings_source is not None else default_initial_holdings(assets, start).encode("utf-8")
-    return _materialize(report, tables, provider, output, extra)
+    return _materialize(report, tables, provider, output, extra, synthetic)
 
 
 def default_initial_holdings(assets: list[Asset], start: str, cash_krw: str = "1000000000.00") -> str:
@@ -508,7 +508,7 @@ def default_initial_holdings(assets: list[Asset], start: str, cash_krw: str = "1
 
 
 def _materialize(report: FetchReport, tables: dict[str, pd.DataFrame], provider: Provider, output: Path,
-                 extra: dict[str, bytes] | None = None) -> FetchReport:
+                 extra: dict[str, bytes] | None = None, synthetic: bool = False) -> FetchReport:
     tmp = output.parent / f".{output.name}.tmp-{os.getpid()}"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -523,6 +523,8 @@ def _materialize(report: FetchReport, tables: dict[str, pd.DataFrame], provider:
         write_atomic(tmp / name, data)
         files[name] = {"raw_sha256": raw_hash(tmp / name), "logical_sha256": raw_hash(tmp / name), "rows": data.count(b"\n")}
     manifest = {"manifest_version": 1, "snapshot_kind": "research", "provider": report.provider, "request": report.request, "files": files}
+    if synthetic:  # an engineering-test snapshot is labelled in the hashed manifest so it cannot pass for research evidence (OQ-046)
+        manifest["synthetic"] = True
     snapshot_id = hash_json_obj(manifest)
     report.status, report.snapshot_id = "success", snapshot_id
     write_atomic(tmp / "manifest.json", (json.dumps({**manifest, "snapshot_id": snapshot_id}, sort_keys=True, indent=1) + "\n").encode("utf-8"))

@@ -2,7 +2,7 @@
  "note": "Checks whose registry entry declares an unimplemented or incomplete capability (tests/check_registry.py 'gaps'). tools/verify.py --allow-known-gaps lets CI pass while exactly these remain partial and nothing else is failing, skipped, uncovered or newly partial. Adding or keeping an entry here is a reviewed decision; strict mode (the default) still fails on all of them.",
  "partial": {
   "INV-BLACKBOX-001": "regression snapshot is self-generated (reviewed_regression, not an independent oracle); inherent. OS network namespace is runner-dependent",
-  "INV-DATA-001": "research trial space, path engine and HMM lane exist; no research pipeline and no end-to-end research run"
+  "INV-DATA-001": "research pipeline verified end to end only as a reduced synthetic engineering test; the full research profile has not been executed and no research snapshot exists"
  },
  "schema": "known-gaps-1"
 }
