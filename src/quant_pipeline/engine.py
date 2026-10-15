@@ -122,6 +122,11 @@ class PathEngine:
             if cfg.evaluation.continuous_refit.start_at_first_eligible_decision else ()
 
     # ------------------------------------------------------------------------------------------ shared, cached work
+    def regime_for(self, fit: FoldFit, trial: TrialParams) -> RegimeSource:
+        """The fixed table (fixture) is trial-independent; the HMM lane is bound to a fit and to the trial's gate (its state count)."""
+        bind = getattr(self.regime, "bind", None)
+        return bind(fit, trial) if bind is not None else self.regime
+
     def decisions_upto(self, last: int) -> int:
         """Number of decisions at model positions 1..last (equals ``last`` on the fixture)."""
         return sum(1 for p in self.decision_positions if p <= last)
@@ -156,7 +161,7 @@ class PathEngine:
         key = cache_key(fp)
         if key not in self.caches.calibrations:
             self.caches.calibrations[key] = calibrate_fold(
-                self.cfg, self.md, self.cals, self.sess, fit, self.regime, trial,
+                self.cfg, self.md, self.cals, self.sess, fit, self.regime_for(fit, trial), trial,
                 [c for c in self.decision_cutoffs.values() if c <= fit.fit_end_utc],
                 self._initial_weights(), self.caches.agent_memo)
             self.caches.counts["calibrations"] += 1
@@ -174,7 +179,7 @@ class PathEngine:
         if key not in self.caches.targets:
             cut = self.decision_cutoffs[position]
             ctx = agent_context(self.cfg, self.md, self.cals, self.sess, fit, cut)
-            self.caches.targets[key] = (decide(self.cfg, ctx, self.regime, trial, cut, self.caches.agent_memo), ctx)
+            self.caches.targets[key] = (decide(self.cfg, ctx, self.regime_for(fit, trial), trial, cut, self.caches.agent_memo), ctx)
             self.caches.counts["targets"] += 1
         return self.caches.targets[key]
 
