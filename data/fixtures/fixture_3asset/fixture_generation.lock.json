@@ -1,0 +1,23 @@
+{
+  "calendar_session_digest": "sha256:6bd92ae58d06e7e863e46e66d1c7a6007a5737b4784292907eabe2cb1865f442",
+  "command": "tools/generate_fixture.py --scenario fixture-v5 --output data/fixtures/fixture_3asset",
+  "fixture_data_stream": {
+    "name": "fixture_data",
+    "value": 1728
+  },
+  "frozen_at_utc": "2026-10-12T15:33:12Z",
+  "generator_source_hash": "sha256:256dcf30f214e141cb79ffb8989a504d87b133aaa310914b112d441b023ef68b",
+  "scenario_definition_hash": "sha256:59f7cf286071af1ef90d67060132af57a3266736fd9766d8f1ff402b97b1523d",
+  "scenario_id": "fixture-v5",
+  "signoff": {
+    "statement": "Frozen before any model, optimizer or performance output existed. The generator was smoke-run twice into a scratch directory solely to debug the code (row counts and determinism were checked; the scenario was not tuned afterwards). REWORK RECORD: the first lock and fixture were discarded once because a data test found a generator defect (regime label flickered to low_risk on XKRX-closed XNYS anchors inside high_risk blocks); only the regime carry rule was changed, then this lock was frozen and the fixture regenerated. At that time no oracle, expected file, model or performance output existed. A second refreeze followed because a linter autofix altered the generator source after the first freeze; the logical hashes of all generated files were verified identical before and after (formatting-only change). A third rework changed only the fixed_regime_table.csv columns to the schema mandated by spec 7.5 (a requirement missed on the first pass); the other files' logical hashes were verified unchanged. No fixture files were written to the fixture directory before this lock. No independent reviewer has signed off. FOURTH EVENT (disclosed, after the model and verification code existed): the recorded Python version was changed from 3.13.4 to 3.12.15 to match the specification's CPython 3.12 target, because CI on 3.12 correctly refused a lock frozen under 3.13. Only that field changed: the generator source, scenario, seed, calendar digest and library versions are identical, and regeneration under 3.12 reproduces every logical hash. The manifest's generation_lock_hash was recomputed accordingly.",
+    "status": "self_attested_by_author"
+  },
+  "versions": {
+    "exchange_calendars": "4.13.2",
+    "numpy": "2.5.4",
+    "pandas": "3.0.6",
+    "pyarrow": "26.0.0",
+    "python": "3.12.15"
+  }
+}

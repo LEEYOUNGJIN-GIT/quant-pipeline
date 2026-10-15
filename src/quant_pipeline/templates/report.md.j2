@@ -1,0 +1,93 @@
+# {{ title }}
+
+> **Status: {{ status_banner }}**
+> Synthetic fixture data. Results demonstrate implementation properties only; they make no claim about any market, about future returns, or about statistical strength.
+
+- Specification version: `{{ spec_version }}` · profile: `{{ profile }}` · run: `{{ run_id }}`
+- Lineage: spec `{{ lineage.spec_hash[:19] }}` · config `{{ lineage.config_hash[:19] }}` · data `{{ lineage.data_manifest_hash[:19] }}` · code `{{ lineage.code_hash[:19] }}` · lock `{{ lineage.lock_hash }}`
+- Final holdout: **{{ holdout.status }}**{% if holdout.opened %} (opened once; audit `{{ holdout.audit_hash[:19] }}`){% endif %}
+
+## 1. Costs and tax (read first)
+
+**Tax is a zero placeholder.** `sell_tax_bps` is 0 in both profiles; this is a research placeholder, not an assertion that any market, account, investor or instrument is tax-exempt. Net results below are **not production-realistic**.
+Headline results use the 1x cost model (commission {{ costs.commission_bps }} bp, half-spread/slippage {{ costs.half_spread_slippage_bps }} bp, FX conversion {{ costs.fx_conversion_bps }} bp). 0x and 2x are labelled sensitivity replays from the same frozen forecast states.
+
+## 2. Out-of-sample method
+
+- Nested design: outer train → purged / embargoed inner selection → frozen trial → continuous outer-test execution; the ledger, cash, accrual state and pending orders carry across folds without reset.
+- Outer geometry: {{ method.outer_description }}; continuous OOS valuation intervals: **{{ method.oos_intervals }}**.
+- Inner selection: {{ method.inner_description }}.
+- Decision schedule: {{ method.schedule }}. Execution: next executable close, strictly after the decision.
+- Valuation: every XNYS anchor; XKRX closures carry the latest raw mark (`valuation_stale`), limit {{ method.valuation_stale_limit }} anchors.
+
+## 3. Parameter trials and stability
+
+Trial budget: **{{ budget.evaluations }}** trial-fold evaluations ({{ budget.passes }} passes × {{ budget.inner_folds }} inner folds × {{ budget.candidates }} candidates). Executed isolated paths: {{ budget.executed_paths }} ({{ budget.executed_decisions }} decisions) versus a no-sharing replay bound of {{ budget.no_sharing_decisions }}; sharing is by exact dependency fingerprint.
+
+| pass | training end | winner | mean-score margin | tie path | leave-one-fold-out agrees | eligible evaluations |
+|---|---|---|---|---|---|---|
+{% for s in selection %}| {{ s.name }} | {{ s.train_end }} | `{{ s.winner }}` | {{ "%.3f"|format(s.margin) }} | {{ s.tie_path }} | {{ s.loo_agrees }} | {{ s.eligible }}/{{ s.total }} |
+{% endfor %}
+{% for s in selection %}{% if s.unstable %}- `selection_unstable` for pass **{{ s.name }}**: leave-one-fold-out winners differ. Disclosed; the selection rule was not altered.
+{% endif %}{% endfor %}
+
+## 4. Out-of-sample results (1x, net of costs, {{ method.oos_intervals }} aligned intervals)
+
+### 4.1 Strategy and the implementation-matched benchmarks
+
+| series | label | total return | ann. net-excess Sharpe | max drawdown | costs paid (KRW) |
+|---|---|---|---|---|---|
+{% for r in panel_matched %}| {{ r.name }} | {{ r.label }} | {{ "%.4f"|format(r.total_return) }} | {{ r.sharpe }} | {{ "%.4f"|format(r.max_drawdown) }} | {{ r.costs }} |
+{% endfor %}
+Rows in this panel share timing, execution, cost, turnover and cash constraints with the strategy (implementation-matched); they are **not** matched on objective.
+
+### 4.2 Conventional buy-and-hold reference — initial turnover exempt (separate panel)
+
+| series | label | total return | ann. net-excess Sharpe | max drawdown | costs paid (KRW) |
+|---|---|---|---|---|---|
+{% for r in panel_reference %}| {{ r.name }} | {{ r.label }} | {{ "%.4f"|format(r.total_return) }} | {{ r.sharpe }} | {{ "%.4f"|format(r.max_drawdown) }} | {{ r.costs }} |
+{% endfor %}
+This reference is exempt from the ordinary turnover limit at its single initial decision (turnover {{ reference_initial_turnover }}). It is reference-only: it must not be described as identical-condition or turnover-matched, and it is never pooled or ranked with the panel above.
+
+### 4.3 KRW cash reference
+
+{{ cash.name }}: total return {{ "%.4f"|format(cash.total_return) }} (financing / base-rate context; not a risky-strategy implementation match).
+
+## 5. Cost sensitivity (strategy only; common forecasts and targets)
+
+| scenario | total return | ann. net-excess Sharpe | costs paid (KRW) | intervals |
+|---|---|---|---|---|
+{% for r in sensitivity %}| {{ r.name }} | {{ "%.4f"|format(r.total_return) }} | {{ r.sharpe }} | {{ r.costs }} | {{ r.intervals }} |
+{% endfor %}
+
+## 6. Uncertainty
+
+Method: {{ uncertainty.method }}, mean block length {{ uncertainty.block_length }}, {{ uncertainty.replicates }} replicates over the {{ uncertainty.shape }} index matrix (hash `{{ uncertainty.index_hash[:19] }}`). **Status: {{ uncertainty.inference_label }}** — the fixture bootstrap is a deterministic smoke test; its intervals are not inferential and the holdout is excluded.
+
+| series | point Sharpe | interval low | interval high |
+|---|---|---|---|
+{% for r in uncertainty.rows %}| {{ r.name }} | {{ r.point }} | {{ r.low }} | {{ r.high }} |
+{% endfor %}
+
+**{{ trial_warning }}**
+
+## 7. Holdout status
+
+{{ holdout.statement }}
+{% if holdout.opened %}
+Holdout (10 decisions, {{ holdout.intervals }} valuation intervals; not part of the bootstrap or any selection):
+
+| series | label | total return | ann. net-excess Sharpe | max drawdown |
+|---|---|---|---|---|
+{% for r in holdout.rows %}| {{ r.name }} | {{ r.label }} | {{ "%.4f"|format(r.total_return) }} | {{ r.sharpe }} | {{ "%.4f"|format(r.max_drawdown) }} |
+{% endfor %}{% endif %}
+
+## 8. Degraded conditions and known limitations
+
+{% for d in degraded %}- {{ d }}
+{% endfor %}
+## 9. Model limitations
+
+- The daily XNYS-anchored panel is an operational synchronization approximation, not a simultaneous cross-market covariance; lead-lag and stale-information bias remain.
+- The fixture decision lane uses a fixed regime table; the hidden-Markov path is exercised only by an integration probe against an independent oracle.
+- Data are synthetic. No statement here concerns real markets.

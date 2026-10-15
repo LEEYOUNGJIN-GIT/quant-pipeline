@@ -1,0 +1,19 @@
+{
+  "algorithm": "oracle-sobol-floor-map-v1",
+  "cardinality": 8,
+  "dimension_order": [
+    "agents.defensive.overlay_gamma_candidates",
+    "objective.lambda_cost_candidates",
+    "objective.lambda_track_candidates"
+  ],
+  "scipy": "1.18.1",
+  "seed": 1729,
+  "seed_stream": "trial_sobol",
+  "sizes": [
+    2,
+    2,
+    2
+  ],
+  "stop_reason": "cap_reached",
+  "target": 8
+}
