@@ -42,7 +42,7 @@ class Opening:
 
 @dataclass
 class Caches:
-    fits: dict[int, FoldFit] = field(default_factory=dict)
+    fits: dict[Any, FoldFit] = field(default_factory=dict)
     calibrations: dict[str, ObjectiveCalibration] = field(default_factory=dict)
     targets: dict[tuple, DecisionTarget] = field(default_factory=dict)
     agent_memo: dict = field(default_factory=dict)
@@ -134,19 +134,23 @@ class PathEngine:
     def refit_position(self, position: int) -> int:
         return max(r for r in self.refits if r <= position)
 
-    def fit(self, refit_pos: int) -> FoldFit:
-        if refit_pos not in self.caches.fits:
-            self.caches.fits[refit_pos] = fit_core(self.cfg, self.md, self.cals, self.sess, fold_id="shared", refit_id=f"r{refit_pos}",
-                                                   fit_end_utc=self.cutoffs[refit_pos - 1], hashes=self.hashes)
+    def fit(self, refit_pos: int, n_components: int | None = None) -> FoldFit:
+        key: Any = refit_pos if n_components is None else (refit_pos, n_components)
+        if key not in self.caches.fits:
+            self.caches.fits[key] = fit_core(self.cfg, self.md, self.cals, self.sess, fold_id="shared", refit_id=f"r{refit_pos}",
+                                             fit_end_utc=self.cutoffs[refit_pos - 1], hashes=self.hashes, n_components=n_components)
             self.caches.counts["fits"] += 1
         else:
             self.caches.counts["cache_hits"] += 1
-        return self.caches.fits[refit_pos]
+        return self.caches.fits[key]
 
     @staticmethod
     def _target_subset(t: TrialParams) -> dict[str, Any]:
         """Only target-producing dimensions enter the key; the lambdas shape the optimizer, never the target (spec 3.4)."""
-        return {"overlay_gamma": t.overlay_gamma, "entry_z": t.entry_z, "horizon_weights": list(t.horizon_weights), "gate": t.gate_name}
+        out = {"overlay_gamma": t.overlay_gamma, "entry_z": t.entry_z, "horizon_weights": list(t.horizon_weights), "gate": t.gate_name}
+        if t.n_components is not None:  # research only; the fixture's fingerprint keeps its exact keys
+            out["n_components"] = t.n_components
+        return out
 
     def calibration(self, refit_pos: int, trial: TrialParams, fit: FoldFit) -> ObjectiveCalibration:
         fp = build_fingerprint(
@@ -278,7 +282,7 @@ class PathEngine:
             snap = LedgerSnapshot(runner.ledger.cash, dict(runner.ledger.holdings), cut)
             if policy is None:
                 rpos = self.refit_position(pos)
-                fit = self.fit(rpos)
+                fit = self.fit(rpos, trial.n_components)
                 cal = self.calibration(rpos, trial, fit)
                 tgt, ctx = self.target(pos, trial, fit)
                 inp = OptimizerInputs(tgt.a_bar, w_minus, fit.covariance.matrix, cal.w_track, cal.scales,

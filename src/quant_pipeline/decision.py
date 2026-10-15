@@ -50,6 +50,7 @@ class TrialParams:
     lambda_track: float
     lambda_risk: float
     lambda_cost: float
+    n_components: int | None = None  # research trial dimension (OQ-043); None = the profile's first candidate (the fixture's only one)
 
     @classmethod
     def first(cls, cfg: Config, gate_name: str | None = None) -> TrialParams:

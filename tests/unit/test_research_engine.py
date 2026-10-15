@@ -93,3 +93,16 @@ def test_the_fixture_engine_is_the_degenerate_case():
     eng = E.PathEngine(cfg, md, CALS, sess, rm, StubRegime(), lineage_hashes(cfg, ROOT))
     assert eng.decision_positions == tuple(range(1, 71)) and list(eng.decision_cutoffs.values()) == eng.cutoffs
     assert [d.decision_id for d in rm.decision_rows][:2] == ["D001", "D002"] and eng.decisions_upto(17) == 17
+
+
+def test_the_pca_component_count_is_a_trial_dimension_with_its_own_fit(research):
+    cfg, _, eng, opening = research
+    base, wide = eng.fit(1), eng.fit(1, 3)
+    assert base is not wide and base.key != wide.key  # distinct core-fit fingerprints
+    assert len(base.pca.loadings) == cfg.pca.n_components_candidates[0] and len(wide.pca.loadings) == 3
+    assert eng.fit(1, 3) is wide  # cached per (refit, components)
+    trial = TrialParams(*TrialParams.first(cfg, gate_name="balanced_2state").__dict__.values())
+    three = TrialParams(trial.overlay_gamma, trial.entry_z, trial.horizon_weights, trial.gate_name, trial.lambda_track, trial.lambda_risk,
+                        trial.lambda_cost, 3)
+    res = eng.run(label="c3", fold_id="f", trial=three, trial_hash="sha256:c3", multiplier=1.0, start=1, end=eng.decision_positions[1], opening=opening)
+    assert len(res.decisions) == 2 and eng.fit(1, 3) is wide

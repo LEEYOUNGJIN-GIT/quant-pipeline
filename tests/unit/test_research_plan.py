@@ -59,6 +59,11 @@ def test_plan_counts_decisions_not_model_rows_and_stays_inside_the_caps(repo):
         assert c["deduplicated"] <= c["cap"], unit
     assert plan["counts"]["rolling_kernel_evaluation"]["deduplicated"] == 84  # one evaluation per decision cutoff, not per model row
     assert plan["counts"]["bootstrap_replicate"]["deduplicated"] == 2000
+    assert g["trials_planned"] == 64 and g["candidate_cardinality"] == 5832
+    assert g["distinct_n_components"] == 3 and g["distinct_hmm_fits_per_refit"] >= 3  # (components, states) pairs among the 64 trials
+    n_refits = len(g["refit_positions"])
+    assert plan["counts"]["model_fit_unit"]["deduplicated"] == n_refits * (3 + g["distinct_hmm_fits_per_refit"])
+    assert plan["counts"]["calibration_unit"]["deduplicated"] == n_refits * g["distinct_target_subsets"]
 
 
 def test_the_after_plan_gate_fails_only_on_this_machine_not_on_the_plan(repo):

@@ -55,6 +55,16 @@ def build_compute_plan(cfg: Config, manifest: SplitManifest, design: TrialDesign
 
     n_trials = len(design.trials)
     gammas = len({json.dumps(t["parameters"]["agents.defensive.overlay_gamma_candidates"]) for t in design.trials})
+    gate_states = {g.name: g.applies_to_n_states for g in cfg.regime.agent_gate_candidates}
+    research_dims = cfg.profile.profile_type == "research"
+    n_comps = [t["parameters"].get("pca.n_components_candidates") for t in design.trials]
+    gate_of = [t["parameters"].get("regime.agent_gate_candidates", cfg.regime.agent_gate_candidates[0].name) for t in design.trials]
+    comp_variants = len(set(n_comps))
+    hmm_variants = len({(c, gate_states[g]) for c, g in zip(n_comps, gate_of, strict=True)}) if cfg.regime.mode == "hmm_filtered" else 0
+    target_subsets = len({(json.dumps(t["parameters"]["agents.defensive.overlay_gamma_candidates"]),
+                           json.dumps(t["parameters"]["agents.mean_reversion.entry_z_candidates"]),
+                           json.dumps(t["parameters"]["agents.trend.horizon_weight_candidates"]), g, c)
+                          for t, g, c in zip(design.trials, gate_of, n_comps, strict=True)})
     inner = [(p.name, f.index, f.path_end) for p in manifest.passes for f in p.inner]
     committed = [(o.fold_id, o.test.start_pos, o.test.end_pos) for o in manifest.outer] + [("holdout", manifest.holdout.start_pos, manifest.holdout.end_pos)]
     committed_decisions = sum(d_between(s, e) for _, s, e in committed)
@@ -62,13 +72,14 @@ def build_compute_plan(cfg: Config, manifest: SplitManifest, design: TrialDesign
     attempts = cfg.compute_budget.max_solver_attempts_per_problem
 
     # ---- model_fit_unit: distinct (information cutoff, refit policy) -------------------------------------------------------
-    fit_dedup = len(refits) + (1 if cfg.regime.hmm_pipeline_probe.enabled else 0)
-    fit_nosharing = (sum(len(refits_upto(refits, e)) for _, _, e in inner) * n_trials
-                     + sum(len([r for r in refits if s <= r <= e]) for _, s, e in committed) * mults
+    fit_dedup = len(refits) * (comp_variants + hmm_variants) + (1 if cfg.regime.hmm_pipeline_probe.enabled else 0)
+    fit_factor = 2 if cfg.regime.mode == "hmm_filtered" else 1  # a core fit and an HMM fit per path and refit
+    fit_nosharing = ((sum(len(refits_upto(refits, e)) for _, _, e in inner) * n_trials
+                      + sum(len([r for r in refits if s <= r <= e]) for _, s, e in committed) * mults) * fit_factor
                      + (1 if cfg.regime.hmm_pipeline_probe.enabled else 0))
 
     # ---- calibration_unit: one per (refit, target-producing fingerprint) -------------------------------------------------
-    calib_dedup = len(refits) * gammas
+    calib_dedup = len(refits) * target_subsets
     calib_nosharing = (sum(len(refits_upto(refits, e)) for _, _, e in inner) * n_trials
                        + sum(len([r for r in refits if s <= r <= e]) for _, s, e in committed) * mults)
 
@@ -123,6 +134,8 @@ def build_compute_plan(cfg: Config, manifest: SplitManifest, design: TrialDesign
         "bootstrap_shape": [cfg.bootstrap.replicates, cfg.bootstrap.expected_oos_rows or 0],
         "calibration_contexts": len(cal_contexts), "decision_contexts": len(decision_contexts), "distinct_contexts": len(contexts),
     }
+    if research_dims:  # recorded only for research, so the fixture's plan hash is unchanged
+        graph.update({"distinct_n_components": comp_variants, "distinct_hmm_fits_per_refit": hmm_variants, "distinct_target_subsets": target_subsets})
     if len(dpos) != n:  # recorded only where decisions are a proper subset of the model rows, so the fixture's plan hash is unchanged
         graph["decision_rows"] = len(dpos)
     estimates = {

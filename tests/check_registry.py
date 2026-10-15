@@ -19,11 +19,10 @@ REGISTRY: dict[str, dict[str, Any]] = {
                     "gaps": []},
     "INV-HASH-001": {"tier": "V0", "scope": "independent_oracle", "tests": [U + "test_independent_hashes.py", G + "test_jcs_rfc8785.py", U + "test_config.py"],
                      "gaps": []},
-    "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py", U + "test_research_engine.py", U + "test_hmm_lane.py",
+    "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py", U + "test_research_engine.py", U + "test_hmm_lane.py", U + "test_research_trials.py",
                                                                   U + "test_cli.py::test_data_validate"],
-                     "gaps": [("the research profile can be resolved, validated, row-mapped, planned, and its path engine decides at the scheduled decision rows with "
-                              "the HMM-filtered regime lane, but it cannot run end to end: the research trial space omits the PCA-component and gate/state "
-                              "dimensions (OQ-043) and no research pipeline assembles the stages")]},
+                     "gaps": [("the research profile can be resolved, validated, row-mapped, planned (trial space 5832), and its path engine decides at the scheduled "
+                              "decision rows with the HMM-filtered regime lane, but no research pipeline assembles the stages and no end-to-end research run exists")]},
     "INV-DATA-002": {"tier": "V0", "scope": "fixture_path", "tests": [U + "test_fixture_data.py::test_split_is_neutral", U + "test_fixture_data.py::test_raw_and_total_return",
                                                                   U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate",
                                                                   U + "test_reconciliation.py"], "gaps": []},

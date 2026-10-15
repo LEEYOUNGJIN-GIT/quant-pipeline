@@ -105,7 +105,7 @@ class Evaluator:
         self.engine = PathEngine(cfg, md, cals, sess, rm, regime, hashes, caches)
         self.design = enumerate_trials(cfg)
         self.defaults = {k: self.design.trials[0]["parameters"][k] for k in self.design.trials[0]["parameters"]}
-        self.defaults = {name: fn(cfg)[0] for name, fn in __import__("quant_pipeline.trials", fromlist=["x"]).TRIAL_DIMENSIONS.items()}
+        self.defaults = {name: fn(cfg)[0] for name, fn in __import__("quant_pipeline.trials", fromlist=["x"]).trial_dimensions(cfg).items()}
         self.counts = Counts()
         self.registry = TrialRegistry("run", cfg.evaluation.max_parameter_trials)
         self._rf: dict[str, float] | None = None

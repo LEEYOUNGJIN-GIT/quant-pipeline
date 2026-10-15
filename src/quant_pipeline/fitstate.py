@@ -111,9 +111,12 @@ def fit_core(cfg: Config, md: MarketData, cals: Calendars, sess: dict[str, pd.Da
         seed=None, solver_versions={"exchange_calendars": __import__("exchange_calendars").__version__,
                                     "scikit_learn": __import__("sklearn").__version__},
         numerical_options=default_numerical_options(),
-        trial_influence={"influenced": False, "proof": "core fit reads no trial-overlay dimension",
-                         "excluded_dimensions": ["agents.*", "objective.*", "regime.agent_gate_candidates",
-                                                 "constraints.*", "costs.*"]})
+        trial_influence=({"influenced": False, "proof": "core fit reads no trial-overlay dimension",
+                          "excluded_dimensions": ["agents.*", "objective.*", "regime.agent_gate_candidates",
+                                                  "constraints.*", "costs.*"]} if n_components is None else
+                         {"influenced": True, "parameters": ["pca.n_components_candidates"],
+                          "proof": "the PCA component count is a research trial dimension; no other trial dimension is read",
+                          "excluded_dimensions": ["agents.*", "objective.*", "regime.agent_gate_candidates", "constraints.*", "costs.*"]}))
     return FoldFit(fold_id, refit_id, fit_start, last_used, assets, daily, pca, cov, diag, fp, cache_key(fp))
 
 
