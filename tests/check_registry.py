@@ -99,8 +99,8 @@ REGISTRY: dict[str, dict[str, Any]] = {
     # ---- V4 ------------------------------------------------------------------------------------------------------
     "INV-CHK-002": {"tier": "V4", "scope": "fixture_path", "tests": [I + "test_phase5_resume.py", BB + "test_fixture_fresh_context.py::test_two_clean_runs"], "gaps": []},
     "INV-BLACKBOX-001": {"tier": "V4", "scope": "independent_oracle", "tests": [BB + "test_fixture_fresh_context.py", G + "test_hmm_pipeline.py::test_probe_in_a_fresh_subprocess"],
-                         "gaps": [("the network-denial hook is Python-level only (no OS network namespace); verify.py is not executed inside the fresh context; "
-                                  "the regression snapshot was generated from this implementation's own output (labeled reviewed_regression, not an oracle)")]},
+                         "gaps": [("the regression snapshot was generated from this implementation's own output (labeled reviewed_regression, not an oracle); "
+                                  "this cannot be closed by code. The OS network namespace is used only where the runner permits it and is otherwise recorded as unavailable")]},
     "INV-GOV-001": {"tier": "V4", "scope": "static", "tests": [U + "test_capability.py"], "special": ["ci_provenance"], "gaps": []},
     "INV-VERIFY-001": {"tier": "V4", "scope": "static", "tests": [U + "test_verify_tool.py"], "special": ["self"], "gaps": []},
     # ---- documents -----------------------------------------------------------------------------------------------
