@@ -5,9 +5,10 @@
 # verification of spec 2.2, and verify.py reports the lock check as failing for the candidate by design.
 name: fixture-ci
 
+# `impl` is covered by the pull_request run; a push trigger on it would run (and notify about) every push twice.
 on:
   push:
-    branches: [main, impl]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -68,7 +69,7 @@ jobs:
         if: always()
         run: uv run python tools/verify.py --run-id ci
 
-      - name: Emit this platform's regression projection (input to a reviewed snapshot regeneration)
+      - name: Emit this platform's regression projection (diagnostic input, uploaded with the evidence)
         if: always()
         continue-on-error: true
         env:
@@ -78,7 +79,6 @@ jobs:
           uv run python -m quant_pipeline.pipeline --run-id ci-projection --out-root outputs/ci_projection --root . \
             --config configs/fixture_3asset_aux1024.yaml --projection-out outputs/runs/ci/projection.json
           echo "PROJECTION_SHA256=$(sha256sum outputs/runs/ci/projection.json | cut -d' ' -f1)"
-          echo "PROJECTION_BEGIN"; cat outputs/runs/ci/projection.json; echo; echo "PROJECTION_END"
 
       - name: Explain differences from the regression snapshot (diagnostic)
         if: always()

@@ -92,15 +92,56 @@ def pipeline(root: Path, out: Path, run_id: str, proj: Path | None = None, stop_
     return subprocess.run(cmd, cwd=root, env=child_env(root / "src"), capture_output=True, text=True, check=False, timeout=1800)
 
 
+def _registry_differs(a: dict, e: dict, tol: float) -> bool:
+    """Entry names and eligibility flags are exact; scores may differ by at most ``tol`` (None must match None)."""
+    if a.keys() != e.keys():
+        return True
+    for k, (score, eligible) in e.items():
+        got_score, got_eligible = a[k]
+        if got_eligible != eligible or (got_score is None) != (score is None):
+            return True
+        if score is not None and abs(got_score - score) > tol:
+            return True
+    return False
+
+
+def _paths_differ(a: dict, e: dict) -> bool:
+    """Every field is exact except ``plans``, whose hashes are compared by count and shape only (spec ``plan_hashes: count_only``)."""
+    if a.keys() != e.keys():
+        return True
+    for key, exp in e.items():
+        got = a[key]
+        if got.keys() != exp.keys():
+            return True
+        for f, v in exp.items():
+            if f == "plans":
+                if len(got[f]) != len(v) or not all(isinstance(x, str) and x.startswith("sha256:") for x in got[f]):
+                    return True
+            elif got[f] != v:
+                return True
+    return False
+
+
 def compare_projection(actual: dict, expected: dict, spec: dict, lineage: dict) -> list[str]:
-    """Strict: every field is compared; exclusions come only from the checked-in spec and name exact top-level keys."""
+    """Strict except for the tolerances declared in the checked-in spec; exclusions name exact top-level keys, never patterns."""
     assert all(isinstance(x, str) and "*" not in x for x in spec["excluded_fields"])  # no wildcard/regex exclusions
+    tol = spec.get("tolerances", {})
+    assert set(tol) <= {"registry_score_abs", "plan_hashes", "rationale"} and tol.get("plan_hashes", "count_only") == "count_only"
     a = {k: v for k, v in actual.items() if k not in spec["excluded_fields"]}
     got_lineage = a.pop("lineage")
     problems = [f"lineage.{k}" for k in sorted(set(lineage) | set(got_lineage)) if lineage.get(k) != got_lineage.get(k)]
     e = {k: v for k, v in expected.items() if k not in spec["excluded_fields"]}
     problems += [f"unexpected field {k}" for k in sorted(set(a) - set(e))] + [f"missing field {k}" for k in sorted(set(e) - set(a))]
-    problems += [f"differs: {k}" for k in sorted(set(a) & set(e)) if json.loads(json.dumps(a[k])) != e[k]]
+    for k in sorted(set(a) & set(e)):
+        got = json.loads(json.dumps(a[k]))
+        if k == "registry" and "registry_score_abs" in tol:
+            differs = _registry_differs(got, e[k], float(tol["registry_score_abs"]))
+        elif k == "paths" and tol.get("plan_hashes") == "count_only":
+            differs = _paths_differ(got, e[k])
+        else:
+            differs = got != e[k]
+        if differs:
+            problems.append(f"differs: {k}")
     return problems
 
 
@@ -180,6 +221,34 @@ def test_the_comparison_rejects_changed_unknown_and_wrongly_excluded_fields(line
     assert compare_projection({**base, "lineage": {**lineage, "code_hash": "sha256:x"}}, expected, spec, lineage) == ["lineage.code_hash"]
     with pytest.raises(AssertionError):
         compare_projection(base, expected, {**spec, "excluded_fields": ["pa*"]}, lineage)
+
+
+def test_the_declared_tolerances_accept_runner_noise_and_reject_real_changes(lineage):
+    spec = json.loads((EXPECTED / "projection_spec.json").read_text(encoding="utf-8"))
+    expected = json.loads((EXPECTED / "projection.json").read_text(encoding="utf-8"))
+    base = {**expected, "lineage": lineage}
+    key = next(iter(expected["registry"]))
+    path = next(iter(expected["paths"]))
+
+    def with_registry(entry):
+        return {**base, "registry": {**expected["registry"], key: entry}}
+
+    def with_path(**fields):
+        return {**base, "paths": {**expected["paths"], path: {**expected["paths"][path], **fields}}}
+
+    score, eligible = expected["registry"][key]
+    assert compare_projection(with_registry([score + 0.017, eligible]), expected, spec, lineage) == []  # observed runner noise
+    assert compare_projection(with_registry([score + 0.06, eligible]), expected, spec, lineage) == ["differs: registry"]
+    assert compare_projection(with_registry([score, not eligible]), expected, spec, lineage) == ["differs: registry"]
+    assert compare_projection({**base, "registry": {k: v for k, v in expected["registry"].items() if k != key}}, expected, spec, lineage) == ["differs: registry"]
+    plans = expected["paths"][path]["plans"]
+    assert compare_projection(with_path(plans=["sha256:" + "0" * 64] * len(plans)), expected, spec, lineage) == []  # hashes: count only
+    assert compare_projection(with_path(plans=plans[:-1]), expected, spec, lineage) == ["differs: paths"]
+    assert compare_projection(with_path(plans=["not-a-hash"] * len(plans)), expected, spec, lineage) == ["differs: paths"]
+    for field in ("fills", "nav", "ledger_hash", "costs", "benchmarks"):
+        assert compare_projection(with_path(**{field: "changed"}), expected, spec, lineage) == ["differs: paths"], field
+    with pytest.raises(AssertionError):
+        compare_projection(base, expected, {**spec, "tolerances": {"nav_abs": 1.0}}, lineage)
 
 
 def test_independent_oracle_files_reproduce_exactly_in_the_fresh_context(world):

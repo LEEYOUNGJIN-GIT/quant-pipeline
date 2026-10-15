@@ -378,3 +378,14 @@ CI run 12 (commit f5ebfd6, Linux, CPython 3.12.15, installed from the lock candi
 
 Scope of the claim: the evidence is the CI runner as the target runtime (the repository's designated one, see `.github/workflows/ci.yml`). It is not a separate target-VM run; if a different VM is meant by the specification, the lock needs the same verification there.
 Remaining non-passing checks after this change are the partial ones listed above (INV-DATA-001/002, INV-FETCH-001, INV-BLACKBOX-001, INV-GOV-001).
+
+### Regression snapshot: tolerances instead of exact equality (2026-10-15)
+
+The previous entry assumed that a CI run on Linux/3.12.15 is bit-reproducible. It is not: with the same code and lock, GitHub-hosted runners produced at least two different projections (runs 12 and 14 equalled the locally generated snapshot; runs 8, 9 and 16 did not, and run 16 matched part of the original Windows snapshot). The likely cause is the numerical kernels selected for the runner's CPU; this was not isolated (no CPU data was recorded).
+
+Observed across every variant: fills, NAV, ledger hashes, costs, benchmarks, winners, split/bootstrap hashes and eligibility flags are identical. Registry scores differ by at most 1.7e-2 (no eligibility flips), and the plan hashes, which derive from the scores, therefore differ.
+
+Decision (owner-approved): `projection_spec.json` now declares two tolerances and the comparison reads them from the checked-in spec: registry scores within 5e-2 absolute (names and eligibility exact), and plan hashes compared by count and shape only. Everything else stays exact. Negative controls in `tests/black_box/test_fixture_fresh_context.py` prove that a changed fill, NAV, ledger hash, cost, benchmark, eligibility flag, score beyond tolerance or plan count is still rejected.
+
+What is no longer protected: a change that alters only the plan hashes, or moves registry scores by less than 5e-2, while fills and NAV stay identical. The snapshot in the repository is the local Linux variant; any observed variant passes the new comparison in both directions.
+The CI `push` trigger on `impl` was removed (the pull_request run covers it) so each push runs and notifies once.
