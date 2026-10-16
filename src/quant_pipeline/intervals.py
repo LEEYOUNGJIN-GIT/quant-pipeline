@@ -31,25 +31,35 @@ def _endpoints(cfg: Config, cals: Calendars, rm: RowMap, block: Block) -> dict[s
     return out
 
 
+def _label(rm: RowMap, position: int) -> str:
+    """The fixture decides at every model row (``D###``). Where decisions are a subset (research) a decision row is named by its decision id and any
+    other model row is a plain row (``R####``): an excluded row must never be presented as a decision that did not exist."""
+    if not rm.decisions:
+        return f"D{position:03d}"
+    by_position = {d.position: d.decision_id for d in rm.decisions}
+    return by_position.get(position, f"R{position:04d}")
+
+
 def _block_entry(cfg: Config, cals: Calendars, rm: RowMap, block: Block, excluded: list[dict[str, Any]]) -> dict[str, Any]:
+    last = block.decision_positions[-1] if rm.decisions and block.decision_positions else block.end_pos
     return {"block": block.name, "decision_positions": [block.start_pos, block.end_pos],
             "label_interval": {"value": None, "reason": "no supervised forward label exists in this model"},
             "order_interval_utc": [block.first_decision_cutoff_utc, block.protected_end_utc],
             "scored_holding": {"valuation_sessions": list(block.valuation_sessions), "intervals": len(block.valuation_sessions),
                                "information_fence_utc": block.fence_utc},
             "market_endpoints": _endpoints(cfg, cals, rm, block), "excluded_observations": excluded,
-            "censored_decision": {"id": f"D{block.end_pos:03d}", "cause": "censored_at_block_end: its orders execute after the fence"}}
+            "censored_decision": {"id": _label(rm, last), "cause": "censored_at_block_end: its orders execute after the fence"}}
 
 
-def _ids(positions: tuple[int, ...], cause: str) -> list[dict[str, Any]]:
-    return [{"id": f"D{p:03d}", "position": p, "cause": cause} for p in positions]
+def _ids(rm: RowMap, positions: tuple[int, ...], cause: str) -> list[dict[str, Any]]:
+    return [{"id": _label(rm, p), "position": p, "cause": cause} for p in positions]
 
 
 def interval_report(cfg: Config, cals: Calendars, rm: RowMap, m: SplitManifest) -> dict[str, Any]:
     blocks: list[dict[str, Any]] = []
     for p in m.passes:
         for f in p.inner:
-            excl = _ids(f.purge_positions, "purge_before_validation") + _ids(f.gap_positions, "gap_after_validation")
+            excl = _ids(rm, f.purge_positions, "purge_before_validation") + _ids(rm, f.gap_positions, "gap_after_validation")
             blocks.append({"scope": f"inner:{p.name}", **_block_entry(cfg, cals, rm, f.validation, excl)})
     for o in m.outer:
         blocks.append({"scope": "outer_oos", **_block_entry(cfg, cals, rm, o.test, [])})

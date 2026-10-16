@@ -105,6 +105,16 @@ def holdout_rows(cfg: Config, n_eligible: int) -> int:
     return max(fh.minimum_rows or 0, math.ceil(fh.fraction * n_eligible))
 
 
+def outer_leftover_rows(cfg: Config, n_eligible: int) -> int:
+    """Rows between the last whole outer test and the holdout when folds are anchored at the start (OQ-048). Research moves them into the first fold's
+    initial training span so the last outer test ends on the row before the holdout: no unmanaged carry, no skipped decision. The fixture has none."""
+    if cfg.data.fixture_window is not None:
+        return 0
+    out = cfg.evaluation.outer
+    pre = n_eligible - holdout_rows(cfg, n_eligible)
+    return pre - (out.initial_train_rows + (outer_fold_count(cfg, n_eligible) - 1) * out.step_rows + out.test_rows)
+
+
 def outer_fold_count(cfg: Config, n_eligible: int) -> int:
     """The fixture runs exactly ``maximum_folds``; research derives the count from the data and never truncates to fit a ceiling."""
     out = cfg.evaluation.outer
@@ -183,7 +193,8 @@ def _research_row_map(cfg: Config, cals: Calendars, start: str, end: str) -> tup
         raise ValueError(f"{len(complete_case)} complete-case rows do not exceed the {warm}-row warmup")
     out, n = cfg.evaluation.outer, len(eligible)
     folds, hold = outer_fold_count(cfg, n), holdout_rows(cfg, n)
-    bounds = {f"outer{k}": (out.initial_train_rows + (k - 1) * out.step_rows + 1, out.initial_train_rows + (k - 1) * out.step_rows + out.test_rows)
+    lead = outer_leftover_rows(cfg, n)
+    bounds = {f"outer{k}": (lead + out.initial_train_rows + (k - 1) * out.step_rows + 1, lead + out.initial_train_rows + (k - 1) * out.step_rows + out.test_rows)
               for k in range(1, folds + 1)}
     bounds["holdout"] = (n - hold + 1, n)
     owners = {k: (eligible[lo - 1], eligible[hi - 1]) for k, (lo, hi) in bounds.items()}

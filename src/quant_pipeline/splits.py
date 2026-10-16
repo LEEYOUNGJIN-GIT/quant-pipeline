@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from .calendars import Calendars, RowMap, fmt, holdout_rows, outer_fold_count, parse_delay, utc
+from .calendars import Calendars, RowMap, fmt, holdout_rows, outer_fold_count, outer_leftover_rows, parse_delay, utc
 from .config import Config
 from .hashing import hash_json_obj
 
@@ -117,8 +117,9 @@ def build_split_manifest(cfg: Config, cals: Calendars, rm: RowMap) -> SplitManif
     pre = n - hold_rows
     purge, embargo = ev.purge.minimum_rows, ev.embargo_rows
     folds = []
+    lead = outer_leftover_rows(cfg, n)
     for k in range(outer_fold_count(cfg, n)):
-        train_end = out.initial_train_rows + k * out.step_rows
+        train_end = lead + out.initial_train_rows + k * out.step_rows
         if train_end + out.test_rows > pre:
             raise ValueError("outer test overlaps the holdout")
         folds.append(OuterFold(f"outer-{k + 1}", train_end, _block(f"outer-{k + 1}-test", train_end + 1, train_end + out.test_rows, cfg, cals, rm)))
@@ -148,6 +149,8 @@ def build_split_manifest(cfg: Config, cals: Calendars, rm: RowMap) -> SplitManif
         body["decisions"] = [list(d) for d in decisions]
     m = SplitManifest(tuple(passes), tuple(folds), holdout, refits, n, hash_json_obj(body), decisions)
     validate_manifest(cfg, m)
+    if cfg.data.fixture_window is None and folds[-1].test.end_pos + 1 != holdout.start_pos:
+        raise ValueError("the last outer test does not end on the row before the holdout")  # OQ-048: no unscored stretch between them
     return m
 
 

@@ -117,10 +117,10 @@ def test_the_holdout_used_the_frozen_winner_decides_only_on_scheduled_rows_and_k
     nav = json.loads((run / "strategy.nav.json").read_text(encoding="utf-8"))
     last_oos = p.outer_runs[1.0][-1].result.nav
     first_scored = p.manifest.holdout.valuation_sessions[0]
-    carried = [d for d in nav if d < first_scored]
     assert min(nav) > max(last_oos)  # the ledger continues after the last outer test: no reset, no overlap
-    # rows left over between the last outer test and the holdout are valued with the carried book but are neither decided on nor scored (OQ-048)
-    assert carried and json.loads((p.store.path(audit_key(p)) / "holdout_audit.json").read_text(encoding="utf-8"))["unscored_carry_sessions"] == len(carried)
+    # OQ-048: the last outer test ends on the row before the holdout, so no session is valued with a carried book without being decided on or scored
+    assert p.manifest.outer[-1].test.end_pos + 1 == p.manifest.holdout.start_pos and min(nav) == first_scored
+    assert "unscored_carry_sessions" not in json.loads((p.store.path(audit_key(p)) / "holdout_audit.json").read_text(encoding="utf-8"))
     assert all(d["position"] >= p.manifest.holdout.start_pos for d in decisions)
 
 

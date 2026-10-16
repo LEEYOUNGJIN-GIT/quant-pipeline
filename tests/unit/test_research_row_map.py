@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from quant_pipeline.calendars import Calendars, build_row_map, holdout_rows, outer_fold_count, research_warmup_rows
+from quant_pipeline.calendars import (
+    Calendars,
+    build_row_map,
+    holdout_rows,
+    outer_fold_count,
+    outer_leftover_rows,
+    research_warmup_rows,
+)
 from quant_pipeline.config import load_config
 from quant_pipeline.splits import build_split_manifest
 
@@ -82,10 +89,23 @@ def test_the_split_manifest_is_derived_from_the_data_length_with_the_declared_mi
     rm, _, m = maps
     n = len(rm.eligible)
     assert m.n_positions == n and len(m.outer) == (n - holdout_rows(CFG, n) - 756) // 126 == 5
-    assert m.outer[0].train_end == 756 and m.outer[1].test.start_pos == 756 + 126 + 1
+    lead = outer_leftover_rows(CFG, n)
+    assert 0 <= lead < 126 and m.outer[0].train_end == 756 + lead and m.outer[1].test.start_pos == 756 + lead + 126 + 1
     assert all(o.test.n_decisions >= CFG.evaluation.outer.minimum_decisions_per_test for o in m.outer)
     assert m.holdout.n_decisions >= CFG.final_holdout.minimum_decisions and m.holdout.end_pos == m.n_positions
     assert m.refit_positions[0] == 1 and set(m.refit_positions[1:]) == set(range(22, m.n_positions + 1, 21))
+
+
+def test_the_last_outer_test_ends_on_the_row_before_the_holdout_and_the_leftover_rows_only_extend_the_first_training_span(maps):
+    """OQ-048: rows that no whole fold fits go to the first fold's training span, so nothing is carried unscored into the holdout."""
+    rm, _, m = maps
+    n = len(rm.eligible)
+    lead = outer_leftover_rows(CFG, n)
+    out = CFG.evaluation.outer
+    assert m.outer[-1].test.end_pos + 1 == m.holdout.start_pos
+    assert lead == n - holdout_rows(CFG, n) - (out.initial_train_rows + (len(m.outer) - 1) * out.step_rows + out.test_rows)
+    assert [b.test.start_pos - a.test.end_pos - 1 for a, b in zip(m.outer, m.outer[1:], strict=False)] == [out.step_rows - out.test_rows] * (len(m.outer) - 1)
+    assert m.outer[0].train_end >= out.initial_train_rows  # the declared minimum training history is never reduced
 
 
 def test_decisions_point_to_one_earlier_or_equal_fit_and_to_one_block(maps):
@@ -132,3 +152,24 @@ def test_a_manifest_cannot_be_built_without_loaded_universe_records():
     rm, _ = build_row_map(CFG, CALS, WINDOW)
     with pytest.raises(ValueError, match="universe records are not loaded"):
         build_split_manifest(bare, CALS, rm)
+
+
+def test_the_interval_report_names_decisions_by_id_and_other_excluded_rows_as_plain_rows(maps):
+    """OQ-047: a purged or gap row that is not a decision must not be shown as ``D###``; the censored decision is the block's last decision."""
+    from quant_pipeline.intervals import interval_report
+
+    rm, _, m = maps
+    report = interval_report(CFG, CALS, rm, m)
+    decision_ids = {d.decision_id: d.position for d in rm.decisions}
+    seen_rows = seen_decisions = 0
+    for b in report["blocks"]:
+        for e in b["excluded_observations"]:
+            if e["position"] in decision_ids.values():
+                assert e["id"] in decision_ids and decision_ids[e["id"]] == e["position"]
+                seen_decisions += 1
+            else:
+                assert e["id"] == f"R{e['position']:04d}" and not e["id"].startswith("D")
+                seen_rows += 1
+        cid = b["censored_decision"]["id"]
+        assert cid in decision_ids and not cid.startswith("D0")
+    assert seen_rows > 0 and seen_decisions > 0  # both kinds occur, so neither branch is vacuous

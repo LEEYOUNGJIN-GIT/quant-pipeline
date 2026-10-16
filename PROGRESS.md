@@ -481,3 +481,11 @@ Limits: all evidence is the reduced synthetic engineering run; no research holdo
 ## CI time — one shared synthetic research run (2026-10-16)
 
 The Verify step took 33 minutes (run 33). The reduced synthetic research run (about 4 minutes) was built separately by `test_research_pipeline` and `test_research_holdout`. It is now a session fixture (`tests/integration/conftest.py::research_base`); the pipeline module inspects it and the holdout module opens the holdout on its own copy of a pristine snapshot of it taken before any test ran. Measured locally for the two modules together: about 13 minutes before, 9 minutes 9 seconds after (about 4 minutes saved, roughly 10 % of the CI step; the earlier estimate of about 10 minutes was not measured and was too high). The invariance module, the perturbed holdout run and the nested verify run still build their own worlds.
+
+## Leftover rows before the holdout, and interval labels (2026-10-16)
+
+OQ-048 (decided by the user: exclude the leftover rows from the pre-holdout block): outer folds are anchored to the holdout and the leftover rows (21 on the reduced research profile) extend only the first fold's initial training span. The last outer test now ends on the row before the holdout, the manifest build fails otherwise, no session is carried unscored into the holdout and no scheduled decision is skipped. Fixture untouched (offset 0; fixture holdout, CLI, reporting and interval tests unchanged and passing, 51 tests). The research holdout test now asserts contiguity and the absence of `unscored_carry_sessions`. Reduced research pipeline + holdout modules: 21 passed (11:29 locally while other tests ran in parallel).
+
+OQ-047 (part): `intervals.interval_report` names decision rows by decision id and other excluded model rows `R####` when decisions are a subset of the model rows; the censored decision is the block's last decision. Test: `test_research_row_map.py::test_the_interval_report_names_decisions_by_id...` (both kinds occur, so it is not vacuous).
+
+Not done: wider causality test (single-trial path only, see invariance module); decisions on OQ-043(b), OQ-044, OQ-045, OQ-046, OQ-049 and on closing INV-DATA-001 remain open.
