@@ -19,13 +19,8 @@ from support.synthetic_research import build_research_repo
 
 
 @pytest.fixture(scope="module")
-def run(tmp_path_factory):
-    root, _ = build_research_repo(tmp_path_factory.mktemp("rp"), start=SMOKE_WINDOW[0], end=SMOKE_WINDOW[1])
-    cfg = write_smoke_config(root)
-    out = root / "out"
-    p = ResearchPipeline(root, out, "r1", config=cfg, allow_synthetic=True)
-    proj = p.run()
-    return {"root": root, "cfg": cfg, "out": out, "p": p, "proj": proj}
+def run(research_base):
+    return research_base
 
 
 def art(run, stage_dir_part: str, name: str) -> bytes:

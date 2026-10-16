@@ -36,14 +36,15 @@ def holdout_dirs(out: Path, run: str = "r1") -> list[str]:
 
 
 @pytest.fixture(scope="module")
-def sealed(tmp_path_factory):
-    root, _ = build_research_repo(tmp_path_factory.mktemp("rh"), start=SMOKE_WINDOW[0], end=SMOKE_WINDOW[1])
-    cfg = write_smoke_config(root)
+def sealed(research_base, tmp_path_factory):
+    """Own copies of the pristine sealed run: one that gets opened, one kept sealed for the negative controls."""
+    dest = tmp_path_factory.mktemp("rh")
+    root, spare = dest / "work", dest / "spare"
+    shutil.copytree(research_base["pristine"], root, symlinks=True)
+    shutil.copytree(research_base["pristine"], spare, symlinks=True)
+    cfg = research_base["cfg"]
     p = ResearchPipeline(root, root / "out", "r1", config=cfg, allow_synthetic=True)
-    proj = p.run()
-    spare = root.parent / "spare"  # an untouched copy of the sealed state, for the negative controls that must not use the real opening
-    shutil.copytree(root, spare, symlinks=True)
-    return {"root": root, "cfg": cfg, "out": root / "out", "p": p, "proj": proj, "spare": spare}
+    return {"root": root, "cfg": cfg, "out": root / "out", "p": p, "proj": research_base["proj"], "spare": spare}
 
 
 def test_before_opening_the_selection_is_frozen_the_report_exists_and_no_holdout_artifact_exists(sealed):
