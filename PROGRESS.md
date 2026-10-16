@@ -489,3 +489,9 @@ OQ-048 (decided by the user: exclude the leftover rows from the pre-holdout bloc
 OQ-047 (part): `intervals.interval_report` names decision rows by decision id and other excluded model rows `R####` when decisions are a subset of the model rows; the censored decision is the block's last decision. Test: `test_research_row_map.py::test_the_interval_report_names_decisions_by_id...` (both kinds occur, so it is not vacuous).
 
 Not done: wider causality test (single-trial path only, see invariance module); decisions on OQ-043(b), OQ-044, OQ-045, OQ-046, OQ-049 and on closing INV-DATA-001 remain open.
+
+## Look-ahead invariance across all four trials (2026-10-16)
+
+`test_research_invariance.py` checked one trial (`design.trials[0]`). It now also runs the other three trials of the reduced design on both the unperturbed and the rewritten-future world; they differ in PCA component count (3/2/2/1), regime gate (3-state/2-state tables) and objective weights, which the test asserts. For each: decisions up to the boundary decision (plan hash, aggregate view, weights, branch, orders, objective terms), fills up to its cutoff and NAV up to its date are identical, and the decisions after it differ (so the control is not vacuous). All three passed on the first run: no look-ahead was found. Cost: 266 s extra (module 6 min 26 s locally).
+
+Not covered, deliberately: cost multipliers (the trial-path entry point is fixed at 1x, the 0x/2x ledgers use the outer-fold path), outer folds beyond the inner trial path, and the sealed holdout (covered by the perturbation control in `test_research_holdout.py`). All of it is synthetic engineering evidence on a reduced configuration, not a statement about the real research profile.

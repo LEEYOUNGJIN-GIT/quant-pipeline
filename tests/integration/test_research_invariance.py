@@ -127,3 +127,35 @@ def test_a_deliberate_look_ahead_would_be_detected(worlds, monkeypatch):
     eq.caches.targets.clear()
     restored, _ = eq.target(pos, params, eq.fit(rpos, params.n_components))
     assert np.array_equal(honest.a_bar, restored.a_bar)  # and the honest path matches again
+
+
+@pytest.fixture(scope="module")
+def other_trials(worlds):
+    """The remaining trials of the design (different PCA component counts, regime gates and objective weights), run on both worlds."""
+    out = {}
+    for t in worlds["base_p"].ev.design.trials[1:]:
+        out[t["trial_hash"]] = (t, worlds["base_p"].ev.run_trial_path(t), worlds["pert_p"].ev.run_trial_path(t))
+    return out
+
+
+def test_every_other_trial_is_identical_up_to_the_boundary_and_differs_after_it(worlds, other_trials):
+    """Look-ahead can hide in one trial's configuration only (another component count, gate or weight); each trial gets the same boundary test."""
+    from quant_pipeline.trials import to_trial_params
+
+    cut, t_date = worlds["cutoff"], worlds["t_date"]
+    assert len(other_trials) == len(worlds["base_p"].ev.design.trials) - 1 >= 3
+    shapes = {(to_trial_params(worlds["base_p"].cfg, t["parameters"]).n_components, t["parameters"]["regime.agent_gate_candidates"])
+              for t, _, _ in other_trials.values()}
+    assert len(shapes) == len(other_trials)  # the trials really are different configurations
+    for h, (t, base, pert) in other_trials.items():
+        before = [(a, b) for a, b in zip(base.decisions, pert.decisions, strict=True) if pd.Timestamp(a.cutoff_utc) <= cut]
+        after = [(a, b) for a, b in zip(base.decisions, pert.decisions, strict=True) if pd.Timestamp(a.cutoff_utc) > cut]
+        assert len(before) == DECISION_INDEX + 1 and len(after) >= 5, h
+        for a, b in before:
+            assert (a.position, a.cutoff_utc, a.plan_hash, a.a_bar, a.weights, a.w_minus, a.branch, a.n_orders, a.objective_terms) == \
+                   (b.position, b.cutoff_utc, b.plan_hash, b.a_bar, b.weights, b.w_minus, b.branch, b.n_orders, b.objective_terms), (h, a.position)
+        fb = [(f.order_id, f.ts, f.realized_quantity, f.status) for f in base.fills if pd.Timestamp(f.ts) <= cut]
+        fq = [(f.order_id, f.ts, f.realized_quantity, f.status) for f in pert.fills if pd.Timestamp(f.ts) <= cut]
+        assert fb == fq and len(fb) > 0, h
+        assert {k: v for k, v in base.nav.items() if k <= t_date} == {k: v for k, v in pert.nav.items() if k <= t_date}, h
+        assert any(a.plan_hash != b.plan_hash for a, b in after), h  # the rewritten future reaches this configuration too: not vacuous
