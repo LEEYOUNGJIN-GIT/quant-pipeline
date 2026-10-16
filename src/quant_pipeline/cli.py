@@ -283,6 +283,7 @@ def run(config: CONFIG_OPT, run_id: Annotated[str, typer.Option("--run-id")] = "
 @holdout_app.command("open")
 def holdout_open(config: CONFIG_OPT, run_id: Annotated[str, typer.Option("--run-id")],
                  unlock_final_holdout: Annotated[bool, typer.Option("--unlock-final-holdout")] = False,
+                 allow_synthetic: Annotated[bool, typer.Option("--allow-synthetic", help="engineering tests only: accept a synthetic research snapshot")] = False,
                  repo_root: Annotated[Path, typer.Option("--repo-root", hidden=True)] = Path()) -> None:
     """Open the sealed holdout once. Needs the flag, the acknowledgement variable and a complete pre-holdout report."""
     from .holdout import HoldoutRefused, open_holdout
@@ -290,7 +291,16 @@ def holdout_open(config: CONFIG_OPT, run_id: Annotated[str, typer.Option("--run-
 
     root = repo_root.resolve()
     cfg = load_config(config)
-    pipe = FixturePipeline(root, root / cfg.paths.output_root, run_id, config=str(config))
+    if cfg.regime.mode == "hmm_filtered":  # the research lane: snapshot, HMM-filtered regimes
+        from .research_pipeline import ResearchPipeline, SyntheticSnapshotRefused
+
+        try:
+            pipe = ResearchPipeline(root, root / cfg.paths.output_root, run_id, config=str(config), allow_synthetic=allow_synthetic)
+        except SyntheticSnapshotRefused as e:
+            typer.echo(f"holdout NOT opened: {e}", err=True)
+            raise typer.Exit(1) from e
+    else:
+        pipe = FixturePipeline(root, root / cfg.paths.output_root, run_id, config=str(config))
     try:
         result = open_holdout(pipe, unlock=unlock_final_holdout)
     except HoldoutRefused as e:

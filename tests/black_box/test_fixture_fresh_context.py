@@ -300,13 +300,14 @@ def test_independent_oracle_files_reproduce_exactly_in_the_fresh_context(world):
     # the HMM probe oracle consumes a production probe file and is compared in tests/golden/test_hmm_pipeline.py (also offline)
 
 
-# Research end-to-end modules (about 12 minutes together) are verified by the outer run; the fresh-context run omits them on purpose and the report must
+# Research end-to-end modules (about 18 minutes together) are verified by the outer run; the fresh-context run omits them on purpose and the report must
 # say so: the only check that may be left unmatched is INV-DATA-001, and only because of exactly these files.
-HEAVY_RESEARCH_EVIDENCE = frozenset({"tests/integration/test_research_pipeline.py", "tests/integration/test_research_invariance.py"})
+HEAVY_RESEARCH_EVIDENCE = frozenset({"tests/integration/test_research_pipeline.py", "tests/integration/test_research_invariance.py",
+                                     "tests/integration/test_research_holdout.py"})
 
 
 def test_verify_py_runs_inside_the_network_denied_fresh_context_and_reports_the_same_lineage(world):
-    """Spec 17.3 runs ``verify.py`` in the fresh context. The V0 evidence files are run there, except the two heavy research modules named above;
+    """Spec 17.3 runs ``verify.py`` in the fresh context. The V0 evidence files are run there, except the heavy research modules named above;
     the black-box test itself is excluded (no recursion)."""
     import importlib
     import sys as _sys

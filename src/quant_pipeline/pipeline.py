@@ -86,6 +86,14 @@ class FixturePipeline:
     def _load_config(self, path: Path):
         return load_config(path)
 
+    def holdout_binding(self) -> dict[str, Any]:
+        """Extra identity the holdout audit record carries (empty for the fixture lane, so its audit hash is unchanged)."""
+        return {}
+
+    def holdout_evidence(self, final, refits: list[int]) -> dict[str, bytes] | None:
+        """Extra evidence persisted after the holdout is opened (the research lane records the regime fits the holdout used)."""
+        return None
+
     def _build_row_map(self):
         return build_row_map(self.cfg, self.cals)
 

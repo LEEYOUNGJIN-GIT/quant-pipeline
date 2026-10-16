@@ -77,6 +77,18 @@ class ResearchPipeline(FixturePipeline):
                 "n_fits": len(fits), "fits": fits, "scored_decisions": sum(o.test.n_decisions for o in m.outer),
                 "all_converged": all(f["converged"] for f in fits)}
 
+    def holdout_binding(self) -> dict[str, Any]:
+        return {"evidence_class": self.evidence_class, "snapshot_id": self.snapshot.snapshot_id, "profile": self.cfg.profile.name,
+                "synthetic_snapshot": self.snapshot.synthetic}
+
+    def holdout_evidence(self, final, refits: list[int]) -> dict[str, bytes]:
+        """The regime fits the holdout decisions used: the frozen winner's (component count, state count) at each holdout refit."""
+        params = to_trial_params(self.cfg, final.winner_parameters)
+        ns = self.hmm.n_states_of(params)
+        fits = [self.hmm.fitted(self.ev.engine.fit(r, params.n_components), ns).report() for r in refits]
+        return {"hmm_fits_holdout.json": S.dumps({"evidence_class": self.evidence_class, "winner": final.winner_hash, "refit_positions": refits,
+                                                  "n_fits": len(fits), "fits": fits, "all_converged": all(f["converged"] for f in fits)})}
+
     def _summary(self, runs) -> dict[str, Any]:
         return {**super()._summary(runs), "evidence_class": self.evidence_class, "snapshot_id": None if self.snapshot is None else self.snapshot.snapshot_id}
 

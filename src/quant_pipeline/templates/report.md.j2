@@ -75,7 +75,7 @@ Method: {{ uncertainty.method }}, mean block length {{ uncertainty.block_length 
 
 {{ holdout.statement }}
 {% if holdout.opened %}
-Holdout (10 decisions, {{ holdout.intervals }} valuation intervals; not part of the bootstrap or any selection):
+Holdout ({{ holdout.decisions }} decisions, {{ holdout.intervals }} valuation intervals; not part of the bootstrap or any selection):
 
 | series | label | total return | ann. net-excess Sharpe | max drawdown |
 |---|---|---|---|---|

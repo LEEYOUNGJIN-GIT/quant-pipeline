@@ -193,7 +193,7 @@ def build_context(cfg: Config, ev: Evaluator, outcomes: list[PassOutcome], outer
                         "inference_label": "non-inferential" if not b.intervals_are_inferential else "inferential", "rows": rows,
                         "note": bootstrap_note},
         "holdout": {"status": "opened once (audited)" if opened else "sealed (unopened)", "opened": opened,
-                    "audit_hash": h.get("audit_hash", "none"), "intervals": h.get("intervals", 0), "rows": h.get("rows", []),
+                    "audit_hash": h.get("audit_hash", "none"), "intervals": h.get("intervals", 0), "decisions": h.get("decisions", 0), "rows": h.get("rows", []),
                     "statement": (h.get("statement") or "The final holdout is sealed: no holdout outcome has been read, used for selection, or "
                                   "reported. It can be opened once, with an explicit acknowledgement, after this report is complete.")},
         "degraded": degraded_conditions(outcomes, lineage, extra_degraded, fixture, synthetic),
