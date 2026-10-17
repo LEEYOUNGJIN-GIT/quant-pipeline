@@ -336,7 +336,7 @@ def data_fetch(
     repo_root: Annotated[Path, typer.Option("--repo-root", hidden=True)] = Path(),
 ) -> None:
     """Optional collector (spec 4.6): fetch, cache, validate and materialize an immutable research snapshot. Partial success is a failure."""
-    from .collector import SnapshotError, assets_from_manifest, collect, make_provider
+    from .collector import ProviderError, SnapshotError, assets_from_manifest, collect, make_provider
 
     cfg = load_config(config)
     root = repo_root.resolve()
@@ -360,7 +360,7 @@ def data_fetch(
         report = collect(assets, fx_pair=cfg.fx.pair_id, rates_symbol=cfg.cash.source_id, collector=col, provider=prov, start=start, end=end,
                          output=out, cache_root=root / col.cache_root, jitter_seed=cfg.reproducibility.random_streams.provider_jitter,
                          universe_source=root / cfg.data.universe_manifest)
-    except (ValueError, OSError, SnapshotError) as e:
+    except (ValueError, OSError, SnapshotError, ProviderError) as e:
         typer.echo(f"data fetch failed: {e}", err=True)
         raise typer.Exit(2) from e
     c = report.cache

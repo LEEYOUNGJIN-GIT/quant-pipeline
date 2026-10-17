@@ -375,11 +375,18 @@ def test_the_cli_fetches_offline_into_a_snapshot_named_by_its_id_and_repeats_ide
     assert again.exit_code == 0 and f"cache hits {3 * 4 + 2}" in again.output  # every request came from the content-addressed cache
 
 
-def test_the_cli_reports_failures_per_item_and_exits_1(tmp_path):
+def test_the_cli_reports_failures_per_item_and_exits_1(tmp_path, monkeypatch):
+    monkeypatch.setattr("quant_pipeline.live_provider.build_live_provider", lambda cfg, assets: C.YFinanceProvider())  # the explicitly unsupported stub
     r = _cli(tmp_path, _repo(tmp_path), "--provider", "yfinance")
     assert r.exit_code == 1 and "data fetch: failed" in r.output and "FAIL raw_prices/KRX_A: unsupported_capability" in r.output
     assert (tmp_path / "data" / "snapshots" / "research" / "unknown.failed" / "fetch_report.json").exists()
     assert [p.name for p in (tmp_path / "data" / "snapshots" / "research").iterdir() if not p.name.endswith(".failed")] == ["current"]
+
+
+def test_the_cli_builds_the_live_provider_for_yfinance_and_names_a_missing_ecos_key_without_a_traceback(tmp_path, monkeypatch):
+    monkeypatch.delenv("ECOS_API_KEY", raising=False)
+    r = _cli(tmp_path, _repo(tmp_path), "--provider", "yfinance")
+    assert r.exit_code == 2 and "ECOS_API_KEY is not set" in r.output and "Traceback" not in r.output
 
 
 def test_the_cli_refuses_a_disabled_collector_and_the_fixture_profile_before_any_fetch(tmp_path):
