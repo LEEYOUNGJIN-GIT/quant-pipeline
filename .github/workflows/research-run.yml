@@ -1,0 +1,157 @@
+# Research run on the collected snapshot: trial paths are computed on parallel runners (shards), their checkpoints are merged and one job finishes the
+# remaining stages (outer folds, final selection, bootstrap, pre-holdout report). The run stops before the holdout: opening it is a separate, deliberate
+# step (research-holdout.yml). Everything leaves a job only as an AES-256 encrypted artifact (public repository, non-redistributable data).
+# Needs the secret SNAPSHOT_PASSPHRASE and a finished research-data run.
+name: research-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      data_run_id:
+        description: "run id of the research-data workflow whose encrypted snapshot to use"
+        required: true
+      run_id:
+        description: "research run id (lineage name)"
+        required: false
+        default: "real1"
+      shards:
+        description: "number of parallel runners for the trial paths"
+        required: false
+        default: "16"
+      resume_run_id:
+        description: "optional: run id of an earlier research-run whose merged checkpoints the finishing job continues from"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        run: |
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+          N="${{ inputs.shards }}"
+          python3 -c "import json,sys; n=int(sys.argv[1]); print('matrix=' + json.dumps(list(range(n))))" "$N" >> "$GITHUB_OUTPUT"
+
+  shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+
+      - name: Get and decrypt the snapshot
+        run: |
+          gh run download "${{ inputs.data_run_id }}" -n research-snapshot -D dl
+          mkdir -p data/snapshots/research
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/snapshot.tar.gz.enc | tar -xzf - -C data/snapshots/research
+          ID=$(ls data/snapshots/research | grep -E '^[0-9a-f]{64}$' | head -1)
+          ln -sfn "$ID" data/snapshots/research/current
+          rm -rf dl
+
+      - name: Compute this shard's trial paths
+        run: |
+          uv run python -m quant_pipeline.research_pipeline --run-id "${{ inputs.run_id }}" --out-root outputs/runs \
+            --config configs/research_8_12asset.yaml --trial-shard "${{ matrix.shard }}/${{ inputs.shards }}"
+
+      - name: Encrypt this shard's checkpoints
+        if: always()
+        run: |
+          test -d "outputs/runs/${{ inputs.run_id }}/checkpoints" || exit 0
+          tar -C "outputs/runs/${{ inputs.run_id }}" -czf - checkpoints | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out shard.tar.gz.enc
+
+      - name: Upload the encrypted shard
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: shard-${{ matrix.shard }}
+          path: shard.tar.gz.enc
+          retention-days: 7
+          if-no-files-found: warn
+
+  finish:
+    needs: shard
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+
+      - name: Get and decrypt the snapshot
+        run: |
+          gh run download "${{ inputs.data_run_id }}" -n research-snapshot -D dl
+          mkdir -p data/snapshots/research
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/snapshot.tar.gz.enc | tar -xzf - -C data/snapshots/research
+          ID=$(ls data/snapshots/research | grep -E '^[0-9a-f]{64}$' | head -1)
+          ln -sfn "$ID" data/snapshots/research/current
+          rm -rf dl
+
+      - name: Merge the shard checkpoints (and an earlier run's, if resuming)
+        run: |
+          mkdir -p "outputs/runs/${{ inputs.run_id }}"
+          if [ -n "${{ inputs.resume_run_id }}" ]; then
+            gh run download "${{ inputs.resume_run_id }}" -n "finished-${{ inputs.run_id }}" -D prev || true
+            if [ -f prev/finished.tar.gz.enc ]; then
+              openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in prev/finished.tar.gz.enc | tar -xzf - -C "outputs/runs/${{ inputs.run_id }}"
+            fi
+          fi
+          gh run download "${{ github.run_id }}" -p 'shard-*' -D shards || true
+          for f in shards/*/shard.tar.gz.enc; do
+            [ -f "$f" ] || continue
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in "$f" | tar -xzf - -C "outputs/runs/${{ inputs.run_id }}"
+          done
+          ls "outputs/runs/${{ inputs.run_id }}/checkpoints" | head
+
+      - name: Finish the run (loads valid checkpoints, computes the rest)
+        run: |
+          uv run python -m quant_pipeline.research_pipeline --run-id "${{ inputs.run_id }}" --out-root outputs/runs \
+            --config configs/research_8_12asset.yaml --projection-out projection.json
+
+      - name: Encrypt the run
+        if: always()
+        run: |
+          test -d "outputs/runs/${{ inputs.run_id }}" || exit 0
+          tar -C "outputs/runs" -czf - "${{ inputs.run_id }}" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out finished.tar.gz.enc
+
+      - name: Upload the encrypted run
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: finished-${{ inputs.run_id }}
+          path: finished.tar.gz.enc
+          retention-days: 14
+          if-no-files-found: warn

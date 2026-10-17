@@ -63,7 +63,7 @@ def scope_report(engine: Any, scopes: Mapping[str, Sequence[int]], trial: Any) -
     for scope, positions in scopes.items():
         rows = []
         for pos in positions:
-            fit = engine.fit(engine.refit_position(pos))
+            fit = engine.fit(engine.refit_position(pos), trial.n_components)
             target, _ = engine.target(pos, trial, fit)
             rows.append({o.agent_name: o for o in target.outputs})
         out[scope] = {"positions": [min(positions), max(positions)] if positions else None, **pairwise(rows, assets)}

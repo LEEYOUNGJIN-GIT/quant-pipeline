@@ -1,10 +1,8 @@
 {
  "note": "Checks whose registry entry declares an unimplemented or incomplete capability (tests/check_registry.py 'gaps'). tools/verify.py --allow-known-gaps lets CI pass while exactly these remain partial and nothing else is failing, skipped, uncovered or newly partial. Adding or keeping an entry here is a reviewed decision; strict mode (the default) still fails on all of them.",
  "partial": {
-  "INV-BLACKBOX-001": "Python-level network denial only; verify.py not run inside the fresh context; snapshot is self-generated",
-  "INV-DATA-001": "research profile cannot run (no immutable research snapshot, monthly row map or HMM decision lane)",
-  "INV-DATA-002": "spec 4.3 reconciliation levels 2 and 3 not implemented",
-  "INV-FETCH-001": "collector (data fetch), provider cache and fetch-failure report not implemented"
+  "INV-BLACKBOX-001": "regression snapshot is self-generated (reviewed_regression, not an independent oracle); inherent. OS network namespace is runner-dependent",
+  "INV-DATA-001": "research pipeline verified end to end only as a reduced synthetic engineering test; the full research profile has not been executed and no research snapshot exists"
  },
  "schema": "known-gaps-1"
 }

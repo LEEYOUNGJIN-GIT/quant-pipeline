@@ -1,7 +1,7 @@
 """Fixture/snapshot input loading and causal as-of access (spec 4.2, 4.4). Causality is by ``available_at_utc``."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -59,6 +59,7 @@ class MarketData:
     rates: pd.DataFrame  # rate_date, event_timestamp_utc, available_at_utc, annual_rate
     actions: pd.DataFrame
     max_fx_stale: pd.Timedelta
+    cache: dict = field(default_factory=dict, compare=False, repr=False)  # derived views of this immutable data (see fitstate.full_daily_view)
 
     def raw_mark(self, asset: str, cutoff: pd.Timestamp) -> Decimal:
         s = self.raw[asset]

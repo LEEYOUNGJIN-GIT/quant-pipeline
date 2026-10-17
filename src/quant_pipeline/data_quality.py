@@ -32,6 +32,31 @@ def validate_data(cfg: Config, root: Path) -> list[Result]:
     out.append(_r("files_present", not absent, "all present" if not absent else f"missing {absent}"))
     if absent:
         return out
+    if d.mode == "snapshot":  # spec 4.6: the pointer must resolve to the content-addressed, fully verified snapshot before anything is read
+        from .snapshot import SnapshotResolutionError, resolve_snapshot, scan_contamination
+
+        try:
+            snap = resolve_snapshot(cfg, root)
+        except SnapshotResolutionError as e:
+            out.append(_r("snapshot_resolved", False, str(e)))
+            return out
+        out.append(_r("snapshot_resolved", True, f"{snap.snapshot_id} at {snap.directory.name}"))
+        scan = scan_contamination(cfg, root, snap)
+        out.extend(_r(name, ok, detail) for name, ok, detail in scan)
+        if not all(ok for _, ok, _ in scan):
+            return out
+        from .snapshot import hydrate_universe
+
+        cfg = hydrate_universe(cfg, snap)  # the records the rest of the checks (and later the engine) use are the verified, hashed ones
+        from .calendars import build_row_map, window_from_manifest
+        from .snapshot import complete_case_coverage
+
+        try:
+            rm, sess = build_row_map(cfg, Calendars.load(list(cfg.calendars.required)), window_from_manifest(snap.manifest))
+            out.append(_r("row_map", True, f"{len(rm.complete_case)} complete-case, {len(rm.eligible)} eligible rows, {len(rm.decisions)} monthly decisions"))
+            out.extend(_r(n, ok, d) for n, ok, d in complete_case_coverage(cfg, snap, sess["XNYS"].intersection(sess["XKRX"])))
+        except ValueError as e:  # too short a window, a ninth outer fold, ...: reported, never truncated
+            out.append(_r("row_map", False, str(e)))
 
     # manifest integrity and fixture/research isolation
     manifest = json.loads((root / d.manifest).read_text(encoding="utf-8"))
@@ -63,7 +88,7 @@ def validate_data(cfg: Config, root: Path) -> list[Result]:
         unknown = sorted(set(df.instrument_id) - set(exch))
         out.append(_r(f"{name}_known_instruments", not unknown, f"unknown {unknown}" if unknown else "all declared"))
     out.append(_r("raw_total_return_roles_separate", set(raw.field) == {"close"} and set(tr.field) == {"total_return_index"}
-                  and not (raw.value.values == tr.value.values).all(), "raw=close, total_return=total_return_index, values differ"))
+                  and not (len(raw) == len(tr) and (raw.value.values == tr.value.values).all()), "raw=close, total_return=total_return_index, values differ"))
     out.append(_r("currency_consistent", all((raw[raw.instrument_id == a].currency == c).all() for a, c in ccy.items()),
                   "row currency matches asset metadata"))
 
@@ -89,6 +114,10 @@ def validate_data(cfg: Config, root: Path) -> list[Result]:
                   f"types {sorted(set(ca.action_type))}; unsupported types halt before the event (spec 4.3)"))
     out.append(_r("corporate_actions_declared_before_ex", bool((pd.to_datetime(ca.available_at_utc, utc=True)
                   < pd.to_datetime(ca.ex_timestamp_utc, utc=True)).all()), "available_at precedes ex timestamp"))
+
+    from .reconciliation import reconcile
+
+    out.extend(reconcile(cfg, root).results())  # spec 4.3 levels 1-3 and the halt scope
 
     try:
         cash, qty, as_of = load_initial_holdings(cfg, root)

@@ -23,6 +23,19 @@ TRIAL_DIMENSIONS = {
 }
 
 
+# Research only (OQ-043): spec 11.3 gives the research cardinality as 5832 = 486 x 3 x 4, so the PCA component count and the gate table (which also
+# fixes the HMM state count) are trial dimensions there. The fixture declares both as singletons and keeps its frozen trial hashes: its dimension set
+# is unchanged, i.e. these two enter the hashed parameters only under the research profile.
+RESEARCH_DIMENSIONS = {
+    "pca.n_components_candidates": lambda c: c.pca.n_components_candidates,
+    "regime.agent_gate_candidates": lambda c: [g.name for g in c.regime.agent_gate_candidates],
+}
+
+
+def trial_dimensions(cfg: Config) -> dict[str, Any]:
+    return {**TRIAL_DIMENSIONS, **(RESEARCH_DIMENSIONS if cfg.profile.profile_type == "research" else {})}
+
+
 class SamplerFailure(RuntimeError):
     """The required number of distinct configurations was not reached within the attempted-point bound."""
 
@@ -57,7 +70,7 @@ def trial_hash(params: dict[str, Any]) -> str:
 
 def enumerate_trials(cfg: Config) -> TrialDesign:
     """Scrambled Sobol over non-singleton dimensions sorted by canonical name; coordinates map by ``floor(u*n)``."""
-    cands = {name: _dedupe(list(fn(cfg))) for name, fn in TRIAL_DIMENSIONS.items()}
+    cands = {name: _dedupe(list(fn(cfg))) for name, fn in trial_dimensions(cfg).items()}
     dims = sorted(n for n, v in cands.items() if len(v) > 1)
     sizes = tuple(len(cands[n]) for n in dims)
     cardinality = math.prod(sizes) if dims else 1
@@ -91,10 +104,13 @@ def enumerate_trials(cfg: Config) -> TrialDesign:
 
 
 def to_trial_params(cfg: Config, parameters: dict[str, Any], gate_name: str | None = None) -> TrialParams:
+    research = "regime.agent_gate_candidates" in parameters
     return TrialParams(parameters["agents.defensive.overlay_gamma_candidates"], parameters["agents.mean_reversion.entry_z_candidates"],
-                       tuple(parameters["agents.trend.horizon_weight_candidates"]), gate_name or cfg.regime.agent_gate_candidates[0].name,
+                       tuple(parameters["agents.trend.horizon_weight_candidates"]),
+                       gate_name or parameters.get("regime.agent_gate_candidates") or cfg.regime.agent_gate_candidates[0].name,
                        parameters["objective.lambda_track_candidates"], parameters["objective.lambda_risk_candidates"],
-                       parameters["objective.lambda_cost_candidates"])
+                       parameters["objective.lambda_cost_candidates"],
+                       parameters["pca.n_components_candidates"] if research else None)
 
 
 @dataclass

@@ -19,7 +19,7 @@
 </head>
 <body>
 <h1>{{ title }}</h1>
-<p class="banner"><strong>Status: {{ status_banner }}</strong><br>Synthetic fixture data. Results demonstrate implementation properties only; they make no claim about any market, about future returns, or about statistical strength.</p>
+<p class="banner"><strong>Status: {{ status_banner }}</strong><br>{{ data_note }}</p>
 <p class="muted">Specification <code>{{ spec_version }}</code> · profile <code>{{ profile }}</code> · run <code>{{ run_id }}</code> · lock <code>{{ lineage.lock_hash }}</code> · final holdout: <strong>{{ holdout.status }}</strong></p>
 
 <h2>1. Costs and tax</h2>
@@ -73,6 +73,18 @@
 
 <h2>8. Degraded conditions and limitations</h2>
 <ul>{% for d in degraded %}<li>{{ d }}</li>{% endfor %}</ul>
-<p class="muted">The daily XNYS-anchored panel is an operational synchronization approximation; the fixture decision lane uses a fixed regime table; data are synthetic.</p>
+<p class="muted">The daily XNYS-anchored panel is an operational synchronization approximation; {{ limitation_regime }} {{ limitation_data }}</p>
+{% if research %}
+<h2>10. Research data, monthly decisions and regime fits</h2>
+<p>Snapshot <code>{{ research.snapshot_id[:19] }}</code> from provider <code>{{ research.provider }}</code>, window {{ research.window }}, {{ research.assets|length }} assets: {{ research.assets|join(", ") }}.</p>
+<p>Data terms and assumptions: {{ research.license }}</p>
+<h3>10.1 Monthly decisions in the scored outer folds (strategy, 1x costs)</h3>
+<div class="scroll"><table>
+<tr><th>fold</th><th>decision</th><th>cutoff (UTC)</th><th>risky share</th><th>cash</th><th>orders</th><th>one-way turnover</th><th>branch</th><th>censored</th></tr>
+{% for d in research.decisions %}<tr><td>{{ d.fold }}</td><td>{{ d.decision }}</td><td>{{ d.cutoff }}</td><td>{{ "%.4f"|format(d.risky) }}</td><td>{{ "%.4f"|format(d.cash) }}</td><td>{{ d.orders }}</td><td>{{ "%.4f"|format(d.turnover) }}</td><td>{{ d.branch }}</td><td>{{ d.censored }}</td></tr>
+{% endfor %}</table></div>
+<h3>10.2 Hidden-Markov regime fits</h3>
+<p>{{ research.hmm.n_fits }} fits across {{ research.hmm.refits }} refit positions; every fit converged: <strong>{{ research.hmm.all_converged }}</strong>. Only the forward-filtered state is used (no smoothing).</p>
+{% endif %}
 </body>
 </html>

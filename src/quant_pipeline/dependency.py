@@ -28,8 +28,10 @@ def accepted_lock_hash(root: Path) -> str:
 
 
 def code_hash(package_dir: Path) -> str:
-    files = sorted(package_dir.glob("*.py"))
-    return hash_json_obj({f.name: hash_text(f.read_bytes()) for f in files})
+    """Hash of every Python source file of the package, subpackages included: a change to an agent or any other module must change the lineage, or a
+    resumed run would silently reuse checkpoints computed by older code."""
+    files = sorted(p for p in package_dir.rglob("*.py") if "__pycache__" not in p.parts)
+    return hash_json_obj({f.relative_to(package_dir).as_posix(): hash_text(f.read_bytes()) for f in files})
 
 
 def build_fingerprint(*, artifact_type: str, schema_version: str, algorithm_component_version: str, spec_hash: str,

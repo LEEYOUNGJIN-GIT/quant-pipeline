@@ -56,6 +56,22 @@ def tree_hash(root: Path, skip_dirs: tuple[str, ...] = ()) -> str:
     return h.hexdigest()
 
 
+def invalid_pre_holdout_checkpoints(p: FixturePipeline) -> list[str]:
+    """Every checkpoint of this run outside the holdout that fails validation (missing artifact, altered bytes, wrong lineage), as ``path: reason``."""
+    base = p.store.root / p.run_id / "checkpoints"
+    bad: list[str] = []
+    for meta in sorted(_lp(base).rglob("checkpoint.json")):
+        d = meta.parent
+        rel = d.relative_to(_lp(base)).as_posix()
+        if "fold_id=holdout" in rel or "trial_hash=post-holdout" in rel or any(part.startswith(".") for part in Path(rel).parts):
+            continue
+        fold, trial, stage, refit = (part.split("=", 1)[1] for part in Path(rel).parts)
+        ok, why = p.store.validate(CheckpointKey(p.run_id, fold, trial, stage, refit), p.lineage)
+        if not ok:
+            bad.append(f"{rel}: {why}")
+    return bad
+
+
 def audit_key(p: FixturePipeline) -> CheckpointKey:
     return p.key("11_oos_evaluation", "holdout", "audit")
 
@@ -83,12 +99,18 @@ def open_holdout(p: FixturePipeline, *, unlock: bool, environ: Mapping[str, str]
     if is_open(p):
         _attempt(p, "refused: already opened (max_openings_per_lineage = 1)")
         raise HoldoutRefused("already_opened")
-    p.run()  # loads and validates every pre-holdout checkpoint; refuses on a lineage mismatch
+    # The pre-holdout state must already exist and be intact: opening never computes, repairs or re-derives it (a corrupt artifact would be
+    # quarantined and silently recomputed by an ordinary resume, which is not acceptable for the one irreversible step).
     for name, key in (("final_selection", p.key("11_oos_evaluation", "final", "freeze")),
                       ("pre_holdout_report", p.key("12_bootstrap_and_reports", "global", "pre-holdout"))):
         if not p.store.validate(key, p.lineage)[0]:
             _attempt(p, f"refused: {name} missing or invalid")
             raise HoldoutRefused(f"{name}_missing_or_invalid")
+    invalid = invalid_pre_holdout_checkpoints(p)
+    if invalid:
+        _attempt(p, f"refused: {len(invalid)} pre-holdout checkpoint(s) invalid, first {invalid[0]}")
+        raise HoldoutRefused("pre_holdout_artifact_invalid")
+    p.run()  # loads every pre-holdout checkpoint (all valid, so nothing is computed); refuses on a lineage mismatch
 
     skip = ("fold_id=holdout",)
     before = tree_hash(p.store.root / p.run_id / "checkpoints", skip)
@@ -127,12 +149,13 @@ def open_holdout(p: FixturePipeline, *, unlock: bool, environ: Mapping[str, str]
         "required": {"decisions": fh.minimum_decisions, "fills": fh.minimum_fills, "intervals": fh.minimum_scored_nav_intervals}}
     minima["met"] = (minima["decisions"] >= fh.minimum_decisions and minima["fills"] >= fh.minimum_fills
                      and minima["intervals"] >= fh.minimum_scored_nav_intervals)
+    carried = sorted(d for d in runs[1.0].result.nav if d < sessions[0])  # valued but neither decided on nor scored (rows left over before the holdout)
     audit = {"opened_at_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "opening_number": 1,
              "max_openings_per_lineage": fh.max_openings_per_lineage, "acknowledgement_env": fh.acknowledgement_env,
              "acknowledgement_provided": True, "final_selection_trial": final.winner_hash, "refit_policy": fh.refit_policy,
              "pre_holdout_tree_hash_before": before, "pre_holdout_tree_hash_after": after, "pre_holdout_unchanged": True,
              "lineage": p.lineage, "holdout_checkpoints": [k.ident() for k in keys], "minima": minima,
-             "split_manifest_hash": p.manifest.hash}
+             "split_manifest_hash": p.manifest.hash, **p.holdout_binding(), **({"unscored_carry_sessions": len(carried)} if carried else {})}
     audit["audit_hash"] = hash_json_obj({k: v for k, v in audit.items() if k != "opened_at_utc"})
     p.store.write(audit_key(p), {"holdout_audit.json": S.dumps(audit)}, lineage=p.lineage, parents=keys, meta={"audit_hash": audit["audit_hash"]})
     from .diagnostics import scope_report
@@ -143,14 +166,19 @@ def open_holdout(p: FixturePipeline, *, unlock: bool, environ: Mapping[str, str]
                   lineage=p.lineage, parents=[audit_key(p)])
     _attempt(p, f"opened: audit {audit['audit_hash'][:19]}")
 
-    h = {"opened": True, "audit_hash": audit["audit_hash"], "intervals": len(sessions), "rows": [
+    extra = p.holdout_evidence(final, sorted({d.refit_position for d in runs[1.0].result.decisions}))
+    if extra:
+        p.store.write(p.key("06_hmm_filtered_state", "holdout"), extra, lineage=p.lineage, parents=[audit_key(p)])
+
+    h = {"opened": True, "audit_hash": audit["audit_hash"], "intervals": len(sessions), "decisions": minima["decisions"], "rows": [
         {"name": r["name"], "label": r["name"], "total_return": r["total_return"], "sharpe": r["sharpe"], "max_drawdown": r["max_drawdown"]}
         for r in rows], "statement": (f"The final holdout was opened once (audit {audit['audit_hash'][:19]}) with the hyperparameters frozen "
                                       "before it was touched; forward refits used only observations available at their cutoffs. "
                                       "The pre-holdout report above is unchanged and no selection used these results.")}
-    ctx = build_context(p.cfg, p.ev, p.outcomes, p.outer_runs, p.summary, p.lineage, p.run_id, holdout=h)
+    ctx = build_context(p.cfg, p.ev, p.outcomes, p.outer_runs, p.summary, p.lineage, p.run_id, holdout=h, evidence_class=p.evidence_class,
+                       research=p._report_extra(p.outcomes, p.outer_runs))
     md, html = render(ctx)
-    scan = scan_terminology(md + "\n" + html)
+    scan = scan_terminology(md + "\n" + html, inferential=p.cfg.bootstrap.intervals_are_inferential)
     p.store.write(p.key("12_bootstrap_and_reports", "global", "post-holdout"),
                   {"report.md": md.encode("utf-8"), "report.html": html.encode("utf-8"), "terminology_scan.json": S.dumps(scan)},
                   lineage=p.lineage, parents=[audit_key(p)])

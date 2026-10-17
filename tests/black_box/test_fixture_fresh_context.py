@@ -59,7 +59,28 @@ def lp(p: Path) -> Path:
     return Path(prefix + s) if sys.platform == "win32" and not s.startswith(prefix) else Path(s)
 
 
-def build_root(dest: Path) -> Path:
+_NETNS_PROBE = "import socket,sys\ntry:\n    socket.create_connection(('192.0.2.1', 80), timeout=3)\nexcept OSError as e:\n    print(type(e).__name__)\n    sys.exit(0)\nsys.exit(3)\n"
+
+
+def netns_prefix() -> tuple[list[str], str]:
+    """OS-level isolation where the runner supports it (spec 17.3): ``(command prefix, "")`` or ``([], reason it is unavailable)``.
+
+    The prefix is only returned after a child under it has been refused by the kernel itself, i.e. without the Python hook.
+    """
+    exe = shutil.which("unshare")
+    if exe is None:
+        return [], "unshare is not installed"
+    prefix = [exe, "-n", "-r", "--"]
+    try:
+        r = subprocess.run([*prefix, sys.executable, "-c", _NETNS_PROBE], capture_output=True, text=True, check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return [], f"unshare failed to start: {type(e).__name__}"
+    if r.returncode != 0:
+        return [], f"unprivileged network namespaces are not permitted here (exit {r.returncode}: {r.stderr.strip()[:120] or r.stdout.strip()[:120]})"
+    return prefix, ""
+
+
+def build_root(dest: Path, *, with_verify: bool = False) -> Path:
     """Copy only what a fresh context may use; prior outputs, caches, checkpoints and local overrides are excluded."""
     dest.mkdir(parents=True)
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
@@ -72,6 +93,17 @@ def build_root(dest: Path) -> Path:
     shutil.copy(ROOT / "IMPLEMENTATION_SPEC.md", dest / "IMPLEMENTATION_SPEC.md")
     if (ROOT / "uv.lock").exists():  # spec 17.3: the fresh context receives the accepted lock (a candidate is flagged by the environment)
         shutil.copy(ROOT / "uv.lock", dest / "uv.lock")
+    if with_verify:  # verify.py needs the checked-in test code and registry it maps onto; never the regeneration tools or prior outputs
+        for sub in ("unit", "golden", "integration", "support"):
+            shutil.copytree(ROOT / "tests" / sub, dest / "tests" / sub, ignore=ignore)
+        for name in ("check_registry.py", "known_gaps.json"):
+            shutil.copy(ROOT / "tests" / name, dest / "tests" / name)
+        for name in ("verify.py", "spec_lint.py", "generate_fixture.py", "hmm_probe_oracle.py"):
+            shutil.copy(ROOT / "tools" / name, dest / "tools" / name)
+        for name in ("pyproject.toml", "README.md", "PROGRESS.md", "open-questions.md", "ADOPTION_MATRIX.md", "FINAL_SPEC_RECONSTRUCTION_PROMPT.md",
+                     "PROJECT_ALIGNMENT_REVIEW.md", "SPEC_RECOVERY_DECISION.md"):
+            if (ROOT / name).exists():
+                shutil.copy(ROOT / name, dest / name)
     for f in (dest / "tests" / "expected").rglob("*"):  # expected files are read-only in the fresh context
         if f.is_file():
             f.chmod(stat.S_IREAD)
@@ -150,7 +182,7 @@ def world(tmp_path_factory):
     base = tmp_path_factory.mktemp("bb")
     root = build_root(base / "fresh")
     other = build_root(base / "fresh2")
-    return {"base": base, "root": root, "other": other}
+    return {"base": base, "root": root, "other": other, "verify_root": build_root(base / "fresh3", with_verify=True)}
 
 
 @pytest.fixture(scope="module")
@@ -167,6 +199,15 @@ def test_the_denial_hook_is_proven_active_and_a_missing_hook_is_detected(world):
     root = world["root"]
     assert denial_proven(root, child_env(root / "src"))
     assert not denial_proven(root, child_env(root / "src", deny=False))  # negative control: without the hook the probe is not refused
+
+
+def test_the_os_network_namespace_is_used_where_the_runner_supports_it_and_its_absence_is_recorded():
+    prefix, reason = netns_prefix()
+    if prefix:  # the kernel, not the Python hook, refuses the connection (the probe above ran without the hook)
+        assert prefix[0].endswith("unshare")
+    else:  # not a skip: the Python-level hook stays mandatory and the missing OS layer is stated, never silently assumed
+        assert reason
+    print(f"OS network namespace: {'active' if prefix else 'unavailable - ' + reason}")
 
 
 def test_the_fresh_context_contains_only_permitted_inputs_and_imports_its_own_source(world):
@@ -257,3 +298,45 @@ def test_independent_oracle_files_reproduce_exactly_in_the_fresh_context(world):
                        capture_output=True, text=True, check=False, timeout=900)
     assert r.returncode == 0, r.stdout + r.stderr
     # the HMM probe oracle consumes a production probe file and is compared in tests/golden/test_hmm_pipeline.py (also offline)
+
+
+# Research end-to-end modules (about 22 minutes together) are verified by the outer run; the fresh-context run omits them on purpose and the report must
+# say so: the only check that may be left unmatched is INV-DATA-001, and only because of exactly these files.
+HEAVY_RESEARCH_EVIDENCE = frozenset({"tests/integration/test_research_pipeline.py", "tests/integration/test_research_invariance.py",
+                                     "tests/integration/test_research_holdout.py", "tests/integration/test_research_sharding.py"})
+
+
+def test_verify_py_runs_inside_the_network_denied_fresh_context_and_reports_the_same_lineage(world):
+    """Spec 17.3 runs ``verify.py`` in the fresh context. The V0 evidence files are run there, except the heavy research modules named above;
+    the black-box test itself is excluded (no recursion)."""
+    import importlib
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "tests"))
+    registry = importlib.import_module("check_registry").REGISTRY
+    files = sorted({p.split("::")[0] for e in registry.values() if e["tier"] == "V0" for p in e["tests"]})
+    root = world["verify_root"]
+    assert not any("black_box" in f for f in files)
+    assert HEAVY_RESEARCH_EVIDENCE <= set(files)  # the omission below is of registered evidence, not of something that does not exist
+    run_files = [f for f in files if f not in HEAVY_RESEARCH_EVIDENCE]
+    prefix, _ = netns_prefix()
+    out = root / "outputs" / "verify_report.json"
+    cmd = [*prefix, sys.executable, str(root / "tools" / "verify.py"), "--run-id", "bb-verify", "--output", str(out), "--tier", "V0", "--allow-known-gaps", *run_files]
+    r = subprocess.run(cmd, cwd=root, env=child_env(root / "src"), capture_output=True, text=True, check=False, timeout=3000)
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["registry_problems"] == [] and report["checks"]
+    others = {c["id"]: c for c in report["checks"] if c["status"] not in ("pass", "partial")}
+    assert set(others) == {"INV-DATA-001"}, r.stdout[-3000:] + r.stderr[-3000:]  # nothing else fails, is skipped or goes unmatched
+    assert others["INV-DATA-001"]["status"] == "registry_error" and others["INV-DATA-001"]["failed_tests"] == []
+    unmatched = others["INV-DATA-001"]["reasons"][0]
+    assert all(h in unmatched for h in HEAVY_RESEARCH_EVIDENCE) and unmatched.count("tests/") == len(HEAVY_RESEARCH_EVIDENCE)  # exactly the omitted files
+    assert r.returncode == 1 and report["known_gap_gate"]["other_non_passing"] == ["INV-DATA-001"]  # the gate says so instead of passing quietly
+    assert report["lineage"] == {k: v for k, v in lineage_for_verify().items()}  # the same tree was verified
+
+
+def lineage_for_verify() -> dict[str, str]:
+    from quant_pipeline.dependency import accepted_lock_hash
+
+    h = lineage_hashes(load_config(ROOT / "configs" / "fixture_3asset.yaml"), ROOT)
+    return {"spec_hash": h["spec_hash"], "config_hash": h["base_profile_hash"], "data_manifest_hash": h["data_manifest_hash"],
+            "code_hash": h["code_hash"], "lock_hash": accepted_lock_hash(ROOT)}

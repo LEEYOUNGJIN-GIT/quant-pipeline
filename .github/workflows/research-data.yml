@@ -1,0 +1,93 @@
+# Collect a research snapshot from the live providers (Yahoo prices/FX via yfinance, KRW overnight rate from Bank of Korea ECOS) and validate it.
+# The repository is public and the provider data is not redistributable: the snapshot leaves this job only as an AES-256 encrypted artifact, and
+# the logs carry aggregate statistics only. Needs the repository secrets ECOS_API_KEY and SNAPSHOT_PASSPHRASE.
+name: research-data
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "first date"
+        required: false
+        default: "2015-01-02"
+      end:
+        description: "last date"
+        required: false
+        default: "2024-12-31"
+      dividend_payers:
+        description: "asset ids expected to pay dividends regularly (comma separated)"
+        required: false
+        default: "005930.KS,005380.KS,069500.KS,SPY,IEF,TLT,EEM"
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
+      SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+
+      - name: Check the secrets are present (values are never printed)
+        run: |
+          test -n "$ECOS_API_KEY" || { echo "::error::repository secret ECOS_API_KEY is not set"; exit 1; }
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev --extra research-online
+
+      - name: Confirm the ECOS series is the overnight call rate
+        run: uv run python tools/ecos_check.py
+
+      - name: Fetch
+        run: |
+          mkdir -p data/snapshots/research
+          cp configs/research_universe.yaml data/snapshots/research/universe.bootstrap.yaml
+          uv run python - <<'PY'
+          import yaml, pathlib
+          doc = yaml.safe_load(pathlib.Path("configs/research_8_12asset.yaml").read_text())
+          doc["data"]["collector"]["enabled"] = True
+          doc["data"]["universe_manifest"] = "data/snapshots/research/universe.bootstrap.yaml"
+          pathlib.Path("fetch_profile.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
+          PY
+          uv run quant-pipeline data fetch --config fetch_profile.yaml --provider yfinance --start "${{ inputs.start }}" --end "${{ inputs.end }}" \
+            --output-snapshot "data/snapshots/research/<snapshot_id>"
+          ID=$(ls data/snapshots/research | grep -E '^[0-9a-f]{64}$' | head -1)
+          test -n "$ID" || { echo "::error::no snapshot was written"; exit 1; }
+          ln -sfn "$ID" data/snapshots/research/current
+          echo "SNAPSHOT_ID=$ID" >> "$GITHUB_ENV"
+
+      - name: Data quality report (aggregate statistics only)
+        run: |
+          uv run python tools/data_quality_report.py --snapshot "data/snapshots/research/$SNAPSHOT_ID" --universe configs/research_universe.yaml \
+            --dividend-payers "${{ inputs.dividend_payers }}" --out quality_report.json
+
+      - name: Validate with the project's own checks
+        run: uv run quant-pipeline data validate --config configs/research_8_12asset.yaml
+
+      - name: Encrypt the snapshot
+        run: |
+          tar -C data/snapshots/research -czf - "$SNAPSHOT_ID" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out snapshot.tar.gz.enc
+          sha256sum snapshot.tar.gz.enc
+
+      - name: Upload the encrypted snapshot and the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: research-snapshot
+          path: |
+            snapshot.tar.gz.enc
+            quality_report.json
+          retention-days: 14
+          if-no-files-found: warn

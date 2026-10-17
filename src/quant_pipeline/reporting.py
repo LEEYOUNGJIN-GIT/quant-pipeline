@@ -72,12 +72,13 @@ def merge_nav(runs: list[OuterRun], bench: str | None = None) -> tuple[dict[str,
     return nav, last.costs
 
 
-def degraded_conditions(outcomes: list[PassOutcome], lineage: dict[str, str], extra: list[str] | None = None) -> list[str]:
+def degraded_conditions(outcomes: list[PassOutcome], lineage: dict[str, str], extra: list[str] | None = None, fixture: bool = True,
+                        synthetic: bool = False) -> list[str]:
     out = []
     for o in outcomes:
         bad = [e for e in o.evaluations if not e.eligible]
         for e in bad:
-            out.append(f"Selection pass {o.name}: trial {e.trial_hash[7:13]} (inner fold {e.inner_index}) is below the fixture minima "
+            out.append(f"Selection pass {o.name}: trial {e.trial_hash[7:13]} (inner fold {e.inner_index}) is below the {'fixture' if fixture else 'configured'} minima "
                        f"({e.ineligible_reason}: {e.realized_fills} realized fills, {e.executable_decisions} decisions) and is ineligible for that pass.")
         if o.selection_unstable:
             out.append(f"Selection pass {o.name} is labelled selection_unstable: leave-one-fold-out winners differ.")
@@ -85,14 +86,17 @@ def degraded_conditions(outcomes: list[PassOutcome], lineage: dict[str, str], ex
         out.append(f"Runtime is CPython {platform.python_version()}, not the specification's 3.12 target.")
     if lineage["lock_hash"].startswith("unavailable"):
         out.append("No accepted dependency lock exists; the environment is not frozen.")
-    out.append("Decisions use the fixed fixture regime table, not the filtered hidden-Markov lane.")
+    if fixture:
+        out.append("Decisions use the fixed fixture regime table, not the filtered hidden-Markov lane.")
+    elif synthetic:
+        out.append("The input snapshot is synthetic: this run is an engineering test on a reduced configuration and is not research evidence.")
     out.extend(extra or [])
     return out
 
 
 def build_context(cfg: Config, ev: Evaluator, outcomes: list[PassOutcome], outer: dict[float, list[OuterRun]], summary: dict[str, Any],
                   lineage: dict[str, str], run_id: str, holdout: dict[str, Any] | None = None,
-                  extra_degraded: list[str] | None = None) -> dict[str, Any]:
+                  extra_degraded: list[str] | None = None, evidence_class: str | None = None, research: dict[str, Any] | None = None) -> dict[str, Any]:
     ppy = cfg.evaluation.periods_per_year
     rf = ev.risk_free()
     sessions = [s for o in ev.manifest.outer for s in o.test.valuation_sessions]
@@ -132,17 +136,46 @@ def build_context(cfg: Config, ev: Evaluator, outcomes: list[PassOutcome], outer
     h = holdout or {}
     opened = bool(h.get("opened"))
     ref_run = runs1[0].benchmarks["equal_weight_buy_and_hold_reference"]
+    fixture = cfg.profile.profile_type == "fixture"
+    synthetic = evidence_class == "synthetic_engineering_test"
+    if fixture:
+        title = "Heterogeneous-agent portfolio model - fixture evaluation report"
+        banner = "FIXTURE SMOKE (synthetic data); DEGRADED conditions are listed in section 8"
+        data_note = ("Synthetic fixture data. Results demonstrate implementation properties only; they make no claim about any market, "
+                     "about future returns, or about statistical strength.")
+        limitation_regime = ("The fixture decision lane uses a fixed regime table; the hidden-Markov path is exercised only by an integration "
+                             "probe against an independent oracle.")
+        limitation_data = "Data are synthetic. No statement here concerns real markets."
+        bootstrap_note = "the fixture bootstrap is a deterministic smoke test; its intervals are not inferential and the holdout is excluded."
+        schedule = "every eligible canonical cutoff (fixture testing profile, not an economic recommendation)"
+        outer_description = f"two outer folds of {cfg.evaluation.outer.test_rows} decisions after {cfg.evaluation.outer.initial_train_rows} training decisions"
+    else:
+        title = "Heterogeneous-agent portfolio model - research evaluation report" + (" (SYNTHETIC engineering test)" if synthetic else "")
+        banner = ("SYNTHETIC ENGINEERING TEST (not research evidence); " if synthetic else "RESEARCH EVALUATION; ") + "DEGRADED conditions are listed in section 8"
+        data_note = ("Synthetic engineering-test data on a reduced configuration. Results demonstrate implementation properties only; they make no claim "
+                     "about any market, about future returns, or about statistical strength."
+                     if synthetic else
+                     "Results describe a historical evaluation of the supplied research snapshot only; they make no claim about future returns, "
+                     "and the reported intervals carry the limits stated in section 7.")
+        limitation_regime = "The decision lane uses the hidden-Markov filtered state (forward recursion only; no smoothing) fitted per refit."
+        limitation_data = ("Data are synthetic. No statement here concerns real markets." if synthetic else
+                           "Results depend on the supplied snapshot, its provider conventions and its license; they are not production-realistic.")
+        bootstrap_note = (f"intervals are {'inferential' if b.intervals_are_inferential else 'non-inferential'} as configured; "
+                          "the holdout is excluded.")
+        schedule = "monthly: the first eligible canonical cutoff of each calendar month"
+        outer_description = (f"{len(ev.manifest.outer)} outer folds of {cfg.evaluation.outer.test_rows} model rows after "
+                             f"{cfg.evaluation.outer.initial_train_rows} training rows (decisions are monthly)")
     ctx = {
-        "title": "Heterogeneous-agent portfolio model - fixture evaluation report",
-        "status_banner": "FIXTURE SMOKE (synthetic data); DEGRADED conditions are listed in section 8",
+        "title": title, "data_note": data_note, "limitation_regime": limitation_regime, "limitation_data": limitation_data,
+        "status_banner": banner,
         "spec_version": SPEC_VERSION, "profile": cfg.profile.name, "run_id": run_id, "lineage": lineage,
         "costs": {"commission_bps": cfg.costs.commission_bps, "half_spread_slippage_bps": cfg.costs.half_spread_slippage_bps,
                   "fx_conversion_bps": cfg.costs.fx_conversion_bps},
-        "method": {"outer_description": f"two outer folds of {cfg.evaluation.outer.test_rows} decisions after {cfg.evaluation.outer.initial_train_rows} training decisions",
+        "method": {"outer_description": outer_description,
                    "oos_intervals": len(sessions),
                    "inner_description": f"{cfg.evaluation.inner.folds} validation blocks of {cfg.evaluation.inner.validation_rows} rows per pass, "
                                         f"one gap row, {cfg.evaluation.purge.minimum_rows} purge rows, metric {cfg.evaluation.inner.selection_metric}",
-                   "schedule": "every eligible canonical cutoff (fixture testing profile, not an economic recommendation)",
+                   "schedule": schedule,
                    "valuation_stale_limit": cfg.valuation.max_krx_stale_sessions},
         "budget": budget_numbers,
         "trial_warning": (f"Multiple-trial warning: {n_trials} parameter candidates (cap {cfg.evaluation.max_parameter_trials}) were scored in each of "
@@ -157,12 +190,14 @@ def build_context(cfg: Config, ev: Evaluator, outcomes: list[PassOutcome], outer
         "uncertainty": {"method": "stationary block bootstrap over the continuous aligned outer-OOS tuple", "block_length": b.mean_block_length,
                         "replicates": b.replicates, "shape": f"{summary['bootstrap_shape'][0]}x{summary['bootstrap_shape'][1]}",
                         "index_hash": summary["bootstrap_index_hash"],
-                        "inference_label": "non-inferential" if not b.intervals_are_inferential else "inferential", "rows": rows},
+                        "inference_label": "non-inferential" if not b.intervals_are_inferential else "inferential", "rows": rows,
+                        "note": bootstrap_note},
         "holdout": {"status": "opened once (audited)" if opened else "sealed (unopened)", "opened": opened,
-                    "audit_hash": h.get("audit_hash", "none"), "intervals": h.get("intervals", 0), "rows": h.get("rows", []),
+                    "audit_hash": h.get("audit_hash", "none"), "intervals": h.get("intervals", 0), "decisions": h.get("decisions", 0), "rows": h.get("rows", []),
                     "statement": (h.get("statement") or "The final holdout is sealed: no holdout outcome has been read, used for selection, or "
                                   "reported. It can be opened once, with an explicit acknowledgement, after this report is complete.")},
-        "degraded": degraded_conditions(outcomes, lineage, extra_degraded),
+        "degraded": degraded_conditions(outcomes, lineage, extra_degraded, fixture, synthetic),
+        "research": research,
     }
     return ctx
 
@@ -173,8 +208,10 @@ def render(ctx: dict[str, Any]) -> tuple[str, str]:
     return env.get_template("report.md.j2").render(**ctx), env.get_template("report.html.j2").render(**ctx)
 
 
-def scan_terminology(text: str) -> dict[str, list[str]]:
+def scan_terminology(text: str, inferential: bool = False) -> dict[str, list[str]]:
+    """Forbidden claims and required labels; the bootstrap status label must say what the profile configures (inferential or not)."""
     plain = re.sub(r"<[^>]+>", " ", text)
     forbidden = [why for pat, why in FORBIDDEN_CLAIMS if re.search(pat, plain, flags=re.IGNORECASE)]
-    missing = [why for phrase, why in REQUIRED_PHRASES if phrase.lower() not in plain.lower()]
+    required = [(p, w) if p != "non-inferential" or not inferential else ("inferential", "bootstrap status label") for p, w in REQUIRED_PHRASES]
+    missing = [why for phrase, why in required if phrase.lower() not in plain.lower()]
     return {"forbidden": forbidden, "missing": missing}
