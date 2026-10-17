@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import SPEC_VERSION, asynchrony
-from .agents.base import AgentContext
+from .agents.base import AgentContext, History
 from .calendars import Calendars, fmt, parse_delay, research_warmup_rows, utc
 from .config import Config
 from .covariance import CovarianceResult, fit_ledoit_wolf
@@ -135,6 +135,7 @@ class DailyView:
 
     session_cutoff_ns: np.ndarray  # one per XNYS anchor session, ascending
     cc_float: pd.DataFrame  # the float columns of the complete-case rows, in panel order
+    history: History
     cc_cutoff_ns: np.ndarray
     cc_cutoff_str: tuple[str, ...]
     cc_session_rank: np.ndarray  # number of anchor sessions up to and including each complete-case row
@@ -159,12 +160,15 @@ def full_daily_view(cfg: Config, md: MarketData, cals: Calendars, sess: dict[str
     rank = np.arange(1, len(panel) + 1)[panel.complete_case.to_numpy()]
     cc = panel[panel.complete_case]
     row_times = [utc(c) for c in cc.cutoff_utc]
+    illiquid_all = np.array([1.0 - np.mean([md.tradable(a, t) for a in assets]) for t in row_times])
+    cc_float = cc.select_dtypes(include="float64")
+    full = cc_float.copy()[[f"{a}_return" for a in assets]].to_numpy(float)  # same pandas path (hence layout) as the per-decision arrays
     view = DailyView(
         session_cutoff_ns=np.array([np.datetime64(c.tz_convert("UTC").tz_localize(None)) for c in cutoffs]),
-        cc_float=cc.select_dtypes(include="float64"),
+        cc_float=cc_float, history=History(full, illiquid_all),
         cc_cutoff_ns=np.array([np.datetime64(t.tz_localize(None)) for t in row_times]),
         cc_cutoff_str=tuple(cc.cutoff_utc), cc_session_rank=rank,
-        illiquid=np.array([1.0 - np.mean([md.tradable(a, t) for a in assets]) for t in row_times]))
+        illiquid=illiquid_all)
     md.cache[key] = view
     return view
 
@@ -196,7 +200,7 @@ def agent_context(cfg: Config, md: MarketData, cals: Calendars, sess: dict[str, 
         tradable=np.array([md.tradable(a, cut) for a in assets]), loadings=fit.pca.loadings,
         standardizer_mean=std.mean, standardizer_scale=std.scale, covariance=fit.covariance.matrix, max_weights=caps,
         train_start_row=cfg.data.fixture_window.warmup_rows if cfg.data.fixture_window else research_warmup_rows(cfg), train_end_row=(len(returns) - 1) if calibration else n_fit - 1,
-        illiquid_history=illiquid, row_cutoffs=view.cc_cutoff_str[:m])
+        illiquid_history=illiquid, row_cutoffs=view.cc_cutoff_str[:m], history=view.history)
 
 
 def hmm_features(fit: FoldFit, returns: np.ndarray) -> np.ndarray:

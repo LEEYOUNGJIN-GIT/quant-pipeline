@@ -68,3 +68,41 @@ def test_a_caller_cannot_corrupt_the_cached_history_through_a_context(pipe):
     b = agent_context(pipe.cfg, pipe.md, pipe.cals, pipe.sess, fit, last[1])
     assert not np.any(b.returns == 123.0) and not np.any(b.illiquid_history == 9.0)
     del pos, cut
+
+
+def test_the_risk_pressure_of_every_decision_is_identical_with_and_without_the_shared_history(pipe):
+    import dataclasses
+
+    from quant_pipeline.decision import pressure_components
+
+    eng = pipe.ev.engine
+    checked = 0
+    for pos, cut in list(eng.decision_cutoffs.items()):
+        fit = eng.fit(eng.refit_position(pos), None)
+        for calibration in (False, True):
+            if (cut >= fit.fit_end_utc) if not calibration else (cut <= fit.fit_end_utc):
+                ctx = agent_context(pipe.cfg, pipe.md, pipe.cals, pipe.sess, fit, cut, calibration=calibration)
+                with_history = pressure_components(pipe.cfg, ctx)
+                alone = pressure_components(pipe.cfg, dataclasses.replace(ctx, history=None))
+                assert with_history[0] == alone[0] and with_history[1] == alone[1], (pos, calibration)  # exact float equality, thresholds included
+                checked += 1
+    assert checked >= 20
+
+
+def test_every_agent_output_is_identical_with_and_without_the_shared_history(pipe):
+    import dataclasses
+
+    from quant_pipeline.decision import RUNNERS
+
+    eng = pipe.ev.engine
+    checked = 0
+    for pos, cut in list(eng.decision_cutoffs.items()):
+        fit = eng.fit(eng.refit_position(pos), None)
+        for calibration in (False, True):
+            if (cut >= fit.fit_end_utc) if not calibration else (cut <= fit.fit_end_utc):
+                ctx = agent_context(pipe.cfg, pipe.md, pipe.cals, pipe.sess, fit, cut, calibration=calibration)
+                alone = dataclasses.replace(ctx, history=None)
+                for name, run in RUNNERS.items():
+                    assert run(ctx, pipe.cfg) == run(alone, pipe.cfg), (name, pos, calibration)  # exact equality of every field and diagnostic
+                    checked += 1
+    assert checked >= 80
