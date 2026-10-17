@@ -169,5 +169,5 @@ def test_stale_limit_breach_halts(env):
 
 def test_research_stale_limit_six_matches_calendar_history():
     cals = Calendars.load(["XKRX", "XNYS"])
-    start = "2006-10-16"  # fixed, inside the rolling 20-year window of exchange_calendars for any date near the freeze
+    start = "2012-01-02"  # fixed; exchange_calendars supports only the last 20 years from today, so a start near that edge breaks on a given day (2006-10-16 did)
     assert max_stale_run(cals.sessions("XNYS", start, "2026-10-12"), cals.sessions("XKRX", start, "2026-10-12")) == 6

@@ -218,9 +218,9 @@ def assets_from_manifest(universe_manifest: Path) -> list[Asset]:
     return [Asset.model_validate(r) for r in records]
 
 
-def make_provider(name: str, *, source_dir: Path | None = None, license: str | None = None) -> Provider:
+def make_provider(name: str, *, source_dir: Path | None = None, license: str | None = None, live: Callable[[], Provider] | None = None) -> Provider:
     if name == "yfinance":
-        return YFinanceProvider()
+        return live() if live is not None else YFinanceProvider()  # without the live factory the name stays explicitly unsupported
     if name == "local_files":
         if source_dir is None or not license:
             raise ValueError("provider local_files needs --source-dir and --license")

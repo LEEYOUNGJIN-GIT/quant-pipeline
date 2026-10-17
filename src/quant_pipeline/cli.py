@@ -327,7 +327,7 @@ def data_validate(config: CONFIG_OPT, repo_root: Annotated[Path, typer.Option("-
 @data_app.command("fetch")
 def data_fetch(
     config: CONFIG_OPT,
-    provider: Annotated[str, typer.Option("--provider", help="yfinance (explicitly unsupported in this build) or local_files")],
+    provider: Annotated[str, typer.Option("--provider", help="yfinance (Yahoo prices and FX plus the ECOS overnight rate; needs ECOS_API_KEY and the research-online extra) or local_files")],
     start: Annotated[str, typer.Option("--start", help="YYYY-MM-DD")],
     end: Annotated[str, typer.Option("--end", help="YYYY-MM-DD")],
     output_snapshot: Annotated[Path, typer.Option("--output-snapshot", help="snapshot directory; <snapshot_id> is replaced by the manifest id")],
@@ -348,8 +348,14 @@ def data_fetch(
         typer.echo("the collector is disabled in this profile (data.collector.enabled: false); enable it explicitly to fetch", err=True)
         raise typer.Exit(2)
     try:
-        prov = make_provider(provider, source_dir=source_dir, license=license_text)
         assets = assets_from_manifest(root / cfg.data.universe_manifest)
+
+        def live():
+            from .live_provider import build_live_provider
+
+            return build_live_provider(cfg, assets)
+
+        prov = make_provider(provider, source_dir=source_dir, license=license_text, live=live)
         out = output_snapshot if output_snapshot.is_absolute() else root / output_snapshot
         report = collect(assets, fx_pair=cfg.fx.pair_id, rates_symbol=cfg.cash.source_id, collector=col, provider=prov, start=start, end=end,
                          output=out, cache_root=root / col.cache_root, jitter_seed=cfg.reproducibility.random_streams.provider_jitter,

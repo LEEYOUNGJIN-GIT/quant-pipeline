@@ -128,6 +128,47 @@ def asset_returns_matrix(panel: pd.DataFrame, assets: tuple[str, ...]) -> np.nda
     return panel[panel.complete_case][[f"{a}_return" for a in assets]].to_numpy(float)
 
 
+@dataclass(frozen=True)
+class DailyView:
+    """The complete-case history of the whole snapshot, built once. Every panel row depends only on its own cutoff and on the previous row, so the
+    panel a decision at ``cut`` sees is exactly the leading rows of this one (the decision never reads anything later)."""
+
+    session_cutoff_ns: np.ndarray  # one per XNYS anchor session, ascending
+    cc_float: pd.DataFrame  # the float columns of the complete-case rows, in panel order
+    cc_cutoff_ns: np.ndarray
+    cc_cutoff_str: tuple[str, ...]
+    cc_session_rank: np.ndarray  # number of anchor sessions up to and including each complete-case row
+    illiquid: np.ndarray
+
+    def prefix_rows(self, cut: pd.Timestamp) -> int:
+        """Complete-case rows among the anchor sessions whose cutoff is at or before ``cut``."""
+        k = int(np.searchsorted(self.session_cutoff_ns, np.datetime64(utc(cut).tz_localize(None)), side="right"))
+        return int(np.searchsorted(self.cc_session_rank, k, side="right"))
+
+
+def full_daily_view(cfg: Config, md: MarketData, cals: Calendars, sess: dict[str, pd.DatetimeIndex], assets: tuple[str, ...]) -> DailyView:
+    delay = cfg.availability.price_publication_delay
+    key = ("daily_view", delay, assets, len(sess["XNYS"]), sess["XNYS"][0], sess["XNYS"][-1])
+    hit = md.cache.get(key)
+    if hit is not None:
+        return hit
+    d = parse_delay(delay)
+    anchors = sess["XNYS"]
+    cutoffs = [cals.close("XNYS", s) + d for s in anchors]
+    panel = daily_panel(md.total_return, cals, anchors, delay)
+    rank = np.arange(1, len(panel) + 1)[panel.complete_case.to_numpy()]
+    cc = panel[panel.complete_case]
+    row_times = [utc(c) for c in cc.cutoff_utc]
+    view = DailyView(
+        session_cutoff_ns=np.array([np.datetime64(c.tz_convert("UTC").tz_localize(None)) for c in cutoffs]),
+        cc_float=cc.select_dtypes(include="float64"),
+        cc_cutoff_ns=np.array([np.datetime64(t.tz_localize(None)) for t in row_times]),
+        cc_cutoff_str=tuple(cc.cutoff_utc), cc_session_rank=rank,
+        illiquid=np.array([1.0 - np.mean([md.tradable(a, t) for a in assets]) for t in row_times]))
+    md.cache[key] = view
+    return view
+
+
 def agent_context(cfg: Config, md: MarketData, cals: Calendars, sess: dict[str, pd.DatetimeIndex], fit: FoldFit,
                   decision_cutoff_utc: pd.Timestamp, calibration: bool = False) -> AgentContext:
     """Assemble one decision's inputs: causal history through the cutoff plus the frozen fold fit (spec 5.1, 8.2).
@@ -136,27 +177,26 @@ def agent_context(cfg: Config, md: MarketData, cals: Calendars, sess: dict[str, 
     used for references/thresholds ends at that same row, so nothing later than the decision is ever consulted.
     """
     assets = fit.asset_ids
-    d = parse_delay(cfg.availability.price_publication_delay)
     cut = utc(decision_cutoff_utc)
     if cut < fit.fit_end_utc and not calibration:
         raise ValueError("a decision may not precede the fit it uses")
     if calibration and cut > fit.fit_end_utc:
         raise ValueError("a calibration decision must lie inside the training window")
-    xnys = sess["XNYS"][[cals.close("XNYS", s) + d <= cut for s in sess["XNYS"]]]
-    panel = daily_panel(md.total_return, cals, xnys, cfg.availability.price_publication_delay)
-    cc = panel[panel.complete_case]
-    returns = cc[[f"{a}_return" for a in assets]].to_numpy(float)
-    n_fit = int((pd.to_datetime(cc.cutoff_utc, utc=True) <= fit.fit_end_utc).sum())
+    view = full_daily_view(cfg, md, cals, sess, assets)
+    m = view.prefix_rows(cut)
+    # Same pandas operations as the per-decision rebuild this replaces, so the array has the identical memory layout: the layout decides BLAS
+    # summation order, and equal values in another layout move results by one ulp.
+    returns = view.cc_float.iloc[:m].copy()[[f"{a}_return" for a in assets]].to_numpy(float)
+    n_fit = min(m, int(np.searchsorted(view.cc_cutoff_ns, np.datetime64(fit.fit_end_utc.tz_convert("UTC").tz_localize(None)), side="right")))
     std = fit.pca.standardizer
     caps = np.array([a.max_weight for a in (cfg.universe.assets or [])])
-    row_times = [utc(c) for c in cc.cutoff_utc]
-    illiquid = np.array([1.0 - np.mean([md.tradable(a, t) for a in assets]) for t in row_times])
+    illiquid = view.illiquid[:m].copy()
     return AgentContext(
         fold_id=fit.fold_id, refit_id=fit.refit_id, as_of=cut.to_pydatetime(), assets=assets, returns=returns,
         tradable=np.array([md.tradable(a, cut) for a in assets]), loadings=fit.pca.loadings,
         standardizer_mean=std.mean, standardizer_scale=std.scale, covariance=fit.covariance.matrix, max_weights=caps,
         train_start_row=cfg.data.fixture_window.warmup_rows if cfg.data.fixture_window else research_warmup_rows(cfg), train_end_row=(len(returns) - 1) if calibration else n_fit - 1,
-        illiquid_history=illiquid, row_cutoffs=tuple(cc.cutoff_utc))
+        illiquid_history=illiquid, row_cutoffs=view.cc_cutoff_str[:m])
 
 
 def hmm_features(fit: FoldFit, returns: np.ndarray) -> np.ndarray:
