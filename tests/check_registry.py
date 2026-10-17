@@ -21,6 +21,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
                      "gaps": []},
     "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py", U + "test_research_engine.py", U + "test_hmm_lane.py", U + "test_research_trials.py",
                                                                   I + "test_research_pipeline.py", I + "test_research_invariance.py", I + "test_research_holdout.py",
+                                                                  I + "test_research_sharding.py", U + "test_daily_view.py",
                                                                   U + "test_cli.py::test_data_validate"],
                      "gaps": [("the research pipeline runs end to end only as a reduced engineering test on a SYNTHETIC snapshot; the full research profile has never been "
                               "executed (24 h compute budget, no licensed snapshot), so no research result exists; the holdout opening procedure is exercised only on that same synthetic run")]},
@@ -48,7 +49,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
                                                                          I + "test_phase5_engine.py::test_full_path_is_self_financing"], "gaps": []},
     "INV-FIX-001": {"tier": "V1", "scope": "fixture_path", "tests": [BB + "test_fixture_fresh_context.py::test_the_denial_hook", U + "test_coverage.py", I + "test_phase6_holdout.py::test_the_coverage_matrix", U + "test_fixture_data.py"],
                     "gaps": []},
-    "INV-FETCH-001": {"tier": "V1", "scope": "static", "tests": [U + "test_cli.py::test_static_doctor", U + "test_collector.py"], "gaps": []},
+    "INV-FETCH-001": {"tier": "V1", "scope": "static", "tests": [U + "test_cli.py::test_static_doctor", U + "test_collector.py", U + "test_live_adapters.py", I + "test_live_roundtrip.py"], "gaps": []},
     "INV-VAL-001": {"tier": "V1", "scope": "fixture_path", "tests": [I + "test_phase1_vs_oracle.py::test_valuation", I + "test_phase1_vs_oracle.py::test_stale", I + "test_phase1_vs_oracle.py::test_research_stale",
                                                                     U + "test_splits.py"], "gaps": []},
     # ---- V2 ------------------------------------------------------------------------------------------------------

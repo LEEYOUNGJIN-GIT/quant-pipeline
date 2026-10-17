@@ -81,6 +81,7 @@ class FixturePipeline:
 
     # ------------------------------------------------------------------------------------------ profile hooks (research overrides)
     regime_family = "fixed_regime_table"
+    trial_shard: tuple[int, int] | None = None  # (index, count): compute only the trial paths with position % count == index, then stop
     evidence_class: str | None = None  # the research lane labels synthetic engineering snapshots
 
     def _load_config(self, path: Path):
@@ -136,11 +137,16 @@ class FixturePipeline:
                                            "oos_intervals.json": S.dumps(interval_report(self.cfg, self.cals, self.rm, self.manifest))})
 
         paths, k_paths = {}, []
-        for t in design.trials:
+        for i, t in enumerate(design.trials):
+            if self.trial_shard is not None and i % self.trial_shard[1] != self.trial_shard[0]:
+                continue  # another shard's trial: independent isolated paths, merged by copying their checkpoints
             k = self.key("10_event_time_execution_and_accounting", "selection", t["trial_hash"][7:19])
             k_paths.append(k)
             art = self.unit(k, [k_cfg], lambda t=t: S.path_to_artifacts(self.ev.run_trial_path(t)), {"trial_hash": t["trial_hash"]})
             paths[t["trial_hash"]] = S.path_from_artifacts(art)
+        if self.trial_shard is not None:
+            self.progress.note(f"shard {self.trial_shard[0]}/{self.trial_shard[1]} complete: {len(k_paths)} trial paths")
+            return {"trial_shard": list(self.trial_shard), "trial_paths": len(k_paths)}
 
         k_sel = self.key("11_oos_evaluation", "selection")
         art = self.unit(k_sel, k_paths, lambda: {"outcomes.json": S.dumps([S.outcome_to_obj(o) for o in self.ev.selection_from_paths(paths)])})

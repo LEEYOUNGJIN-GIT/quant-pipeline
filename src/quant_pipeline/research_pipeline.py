@@ -119,17 +119,23 @@ def main() -> int:
     ap.add_argument("--stop-after", type=int, default=None)
     ap.add_argument("--projection-out", type=Path, default=None)
     ap.add_argument("--allow-synthetic", action="store_true", help="engineering tests only: accept a snapshot labelled synthetic")
+    ap.add_argument("--trial-shard", default=None, metavar="I/N", help="compute only the trial paths with position %% N == I, then stop (merge shards by copying checkpoints)")
     args = ap.parse_args()
     from .pipeline import StopForTest
 
     p = ResearchPipeline(args.root.resolve(), args.out_root, args.run_id, config=args.config, stop_after=args.stop_after,
                          allow_synthetic=args.allow_synthetic)
+    if args.trial_shard:
+        index, count = (int(x) for x in args.trial_shard.split("/"))
+        if count < 1 or not 0 <= index < count:
+            raise SystemExit(f"--trial-shard needs 0 <= I < N, got {args.trial_shard}")
+        p.trial_shard = (index, count)
     try:
         proj = p.run()
     except StopForTest as e:
         print(f"STOPPED: {e}")
         return 75
-    if args.projection_out:
+    if args.projection_out and not args.trial_shard:
         args.projection_out.write_text(json.dumps(proj, sort_keys=True), encoding="utf-8")
     print(f"complete: computed={len(p.computed)} loaded={len(p.loaded)}")
     return 0
