@@ -495,3 +495,11 @@ Not done: wider causality test (single-trial path only, see invariance module); 
 `test_research_invariance.py` checked one trial (`design.trials[0]`). It now also runs the other three trials of the reduced design on both the unperturbed and the rewritten-future world; they differ in PCA component count (3/2/2/1), regime gate (3-state/2-state tables) and objective weights, which the test asserts. For each: decisions up to the boundary decision (plan hash, aggregate view, weights, branch, orders, objective terms), fills up to its cutoff and NAV up to its date are identical, and the decisions after it differ (so the control is not vacuous). All three passed on the first run: no look-ahead was found. Cost: 266 s extra (module 6 min 26 s locally).
 
 Not covered, deliberately: cost multipliers (the trial-path entry point is fixed at 1x, the 0x/2x ledgers use the outer-fold path), outer folds beyond the inner trial path, and the sealed holdout (covered by the perturbation control in `test_research_holdout.py`). All of it is synthetic engineering evidence on a reduced configuration, not a statement about the real research profile.
+
+## Delegated decisions, README, data hygiene (2026-10-17)
+
+The user delegated implementation decisions to the implementer. OQ-043 (policy b), OQ-044, OQ-045, OQ-046 and OQ-049 are recorded as decided as implemented; OQ-048 was decided earlier. INV-DATA-001 stays partial on purpose: the full research profile has not run on real data (see the plan below), and a synthetic run must not close it.
+
+`README.md` now documents the lanes and what each proves, install, the fixture and research commands, the sealed holdout, verification and the layout. `.gitignore` now excludes `data/snapshots/`, `data/cache/` and `outputs/runs/`: the repository is public and provider data is not redistributable.
+
+Plan to a real-data run: (1) full-scale synthetic timing on GitHub Actions, (2) yfinance (prices, splits, dividends, USD/KRW), Bank of Korea ECOS (KRW overnight rate) and FRED (FX cross-check only) adapters developed offline against hand-made responses, (3) a data workflow that stores the snapshot encrypted, (4) a chained resumable research workflow stopping before the holdout, (5) a research report and an artifact verifier. The sandbox cannot reach any provider; collection happens only in Actions.

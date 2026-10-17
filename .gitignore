@@ -228,3 +228,8 @@ data/processed/
 _*.log
 _*.txt
 .venv312/
+
+# Research data and run outputs must never be committed: the repository is public and provider data is not redistributable.
+/data/snapshots/
+/data/cache/
+/outputs/runs/
