@@ -528,3 +528,11 @@ Workflows (public repository, so every product leaves a job only as an AES-256 e
 - `artifact_check.py` / `tools/verify_artifacts.py` verify a run directory from files alone (checkpoint records and hashes, single lineage, required stages, terminology scan, both report formats, consistent evidence class, sealed or properly opened holdout) and compare two runs byte for byte; tests include negative controls.
 - Integrity gap fixed: `code_hash` covered only `src/quant_pipeline/*.py`, not subpackages such as `agents/`, so editing an agent left the lineage unchanged and a resumed run would reuse checkpoints computed by older code. It now covers every Python file of the package (test added). It also explained why a test that ran while a source file was added failed: the lineage changed mid-run and the pre-holdout validation refused, as designed.
 - CI: run 41 (after the panel and risk-pressure speed-ups, sharding code and live adapters) took about 11 minutes against 28 to 35 before.
+
+## Full-size sharded rehearsal on GitHub runners (2026-10-17)
+
+`research-scale-sharded` runs the unreduced profile on a synthetic 2015-2024 snapshot: 16 shards of 4 trial paths each, a merge, and a finishing job up to the pre-holdout report. Run 39004325164 succeeded end to end in about 38 minutes wall clock (shards 9 to 16 minutes each; the rest is the finishing job). Engineering evidence only; the data is synthetic.
+
+The first attempt (run 39002301995) failed in the finishing job with `lineage_mismatch:data_manifest_hash`: every job built its own synthetic snapshot, and the builds are not guaranteed to agree to the last bit across runner CPUs (the generator uses `np.exp`/`np.sin`). The cause is the working explanation, not something measured: the second run, which builds the snapshot once in a `data` job and shares it as an artifact, passed. The real `research-run` already shares one encrypted snapshot, so it never had this exposure.
+
+Consequence for planning: the 24 hour budget is not binding on hosted runners; the inner selection that took about 11 hours sequentially takes under 20 minutes when sharded 16 ways. What remains for a real result is the data (secrets `ECOS_API_KEY`, `SNAPSHOT_PASSPHRASE` and the provider terms), not compute.
