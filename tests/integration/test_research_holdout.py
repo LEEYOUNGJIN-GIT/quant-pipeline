@@ -130,6 +130,7 @@ def test_the_post_holdout_report_keeps_the_synthetic_label_and_its_decision_coun
     text = (post / "report.md").read_text(encoding="utf-8")
     n = p.manifest.holdout.n_decisions
     assert "SYNTHETIC ENGINEERING TEST" in text and "fixture" not in text.lower()
+    assert "## 10. Research data, monthly decisions and regime fits" in text  # the opened report keeps the research section
     assert "Final holdout: **opened once (audited)**" in text and f"Holdout ({n} decisions," in text
     assert json.loads((post / "terminology_scan.json").read_text(encoding="utf-8")) == {"forbidden": [], "missing": []}
 

@@ -56,3 +56,21 @@ def test_the_matrix_is_deterministic_and_serialisable(setup, tmp_path):
     a = json.dumps(influence.influence_matrix(*setup), sort_keys=True)
     assert a == json.dumps(influence.influence_matrix(*setup), sort_keys=True)
     (tmp_path / "dependency_influence_matrix.json").write_text(a, encoding="utf-8")
+
+
+def test_the_code_hash_covers_subpackages_and_ignores_bytecode(tmp_path):
+    from quant_pipeline.dependency import code_hash
+
+    pkg = tmp_path / "pkg"
+    (pkg / "sub").mkdir(parents=True)
+    (pkg / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (pkg / "sub" / "b.py").write_text("y = 1\n", encoding="utf-8")
+    base = code_hash(pkg)
+    (pkg / "sub" / "b.py").write_text("y = 2\n", encoding="utf-8")  # a change inside a subpackage (e.g. an agent) must move the hash
+    changed = code_hash(pkg)
+    assert changed != base
+    (pkg / "sub" / "__pycache__").mkdir()
+    (pkg / "sub" / "__pycache__" / "b.cpython-312.py").write_text("junk", encoding="utf-8")
+    assert code_hash(pkg) == changed  # bytecode directories never count
+    (pkg / "sub" / "new.py").write_text("z = 1\n", encoding="utf-8")
+    assert code_hash(pkg) != changed  # nor does a new file go unnoticed

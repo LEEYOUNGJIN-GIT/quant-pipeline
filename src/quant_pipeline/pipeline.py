@@ -87,6 +87,10 @@ class FixturePipeline:
     def _load_config(self, path: Path):
         return load_config(path)
 
+    def _report_extra(self, outcomes, outer) -> dict[str, Any] | None:
+        """Profile-specific report content (the research lane adds data provenance, the monthly decision table and the regime fits)."""
+        return None
+
     def holdout_binding(self) -> dict[str, Any]:
         """Extra identity the holdout audit record carries (empty for the fixture lane, so its audit hash is unchanged)."""
         return {}
@@ -238,7 +242,8 @@ class FixturePipeline:
             "lineage": self.lineage}
 
     def _pre_holdout_report(self, outcomes, outer, summary) -> dict[str, bytes]:
-        ctx = build_context(self.cfg, self.ev, outcomes, outer, summary, self.lineage, self.run_id, evidence_class=self.evidence_class)
+        ctx = build_context(self.cfg, self.ev, outcomes, outer, summary, self.lineage, self.run_id, evidence_class=self.evidence_class,
+                            research=self._report_extra(outcomes, outer))
         md, html = render(ctx)
         scan = scan_terminology(md + "\n" + html, inferential=self.cfg.bootstrap.intervals_are_inferential)
         if scan["forbidden"] or scan["missing"]:

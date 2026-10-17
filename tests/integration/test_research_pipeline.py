@@ -147,3 +147,18 @@ def test_the_resumed_lineage_has_byte_identical_artifacts_in_every_checkpoint(ru
     clean, again = _artifacts(run["out"]), _artifacts(resumed["out"])
     assert clean.keys() == again.keys() and len(clean) > 30
     assert {k for k in clean if clean[k] != again[k]} == set()
+
+
+def test_the_report_has_a_research_section_with_provenance_every_scored_decision_and_the_regime_fits(run):
+    md = art(run, "12_bootstrap_and_reports", "report.md").decode("utf-8")
+    html = art(run, "12_bootstrap_and_reports", "report.html").decode("utf-8")
+    p = run["p"]
+    assert "## 10. Research data, monthly decisions and regime fits" in md and "10. Research data" in html
+    assert p.snapshot.snapshot_id[:19] in md and "synthetic test data" in md  # the provider's license statement travels with the report
+    scored = sum(len(r.result.decisions) for r in p.outer_runs[1.0])
+    section = md.split("### 10.1")[1].split("### 10.2")[0]
+    rows = [line for line in section.splitlines() if line.startswith("| outer-")]
+    assert len(rows) == scored > 0
+    ids = {d[0] for d in p.manifest.decisions}
+    assert all(line.split("|")[2].strip() in ids for line in rows)  # real decision ids (d2021mm), never an invented row label
+    assert "every fit converged: **True**" in md and "fixture" not in md.lower()

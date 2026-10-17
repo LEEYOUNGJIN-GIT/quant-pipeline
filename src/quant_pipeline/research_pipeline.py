@@ -89,6 +89,23 @@ class ResearchPipeline(FixturePipeline):
         return {"hmm_fits_holdout.json": S.dumps({"evidence_class": self.evidence_class, "winner": final.winner_hash, "refit_positions": refits,
                                                   "n_fits": len(fits), "fits": fits, "all_converged": all(f["converged"] for f in fits)})}
 
+    def _report_extra(self, outcomes, outer) -> dict[str, Any]:
+        m = self.manifest
+        ids = {d[2]: d[0] for d in m.decisions}  # position -> decision id
+        decisions = []
+        for fold, run in zip(m.outer, outer[1.0], strict=True):
+            for d in run.result.decisions:
+                decisions.append({"fold": fold.fold_id, "decision": ids.get(d.position, f"row {d.position}"), "cutoff": d.cutoff_utc,
+                                  "risky": float(sum(d.a_bar[:-1])), "cash": float(d.a_bar[-1]), "orders": d.n_orders,
+                                  "turnover": float(d.one_way_turnover_intended), "branch": d.branch, "censored": "yes" if d.censored else "no"})
+        hmm = self._hmm_report()
+        manifest = self.snapshot.manifest
+        return {"snapshot_id": self.snapshot.snapshot_id, "provider": manifest.get("provider", {}).get("name", "unknown"),
+                "license": manifest.get("provider", {}).get("license") or "not declared",
+                "window": f"{manifest['request']['start']} to {manifest['request']['end']}", "assets": list(manifest["request"]["assets"]),
+                "decisions": decisions, "hmm": {"n_fits": hmm["n_fits"], "refits": len({f["refit_id"] for f in hmm["fits"]}),
+                                                 "all_converged": hmm["all_converged"], "seed_stream": hmm["seed_stream"]}}
+
     def _summary(self, runs) -> dict[str, Any]:
         return {**super()._summary(runs), "evidence_class": self.evidence_class, "snapshot_id": None if self.snapshot is None else self.snapshot.snapshot_id}
 

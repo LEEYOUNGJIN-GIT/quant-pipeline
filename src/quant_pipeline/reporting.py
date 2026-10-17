@@ -96,7 +96,7 @@ def degraded_conditions(outcomes: list[PassOutcome], lineage: dict[str, str], ex
 
 def build_context(cfg: Config, ev: Evaluator, outcomes: list[PassOutcome], outer: dict[float, list[OuterRun]], summary: dict[str, Any],
                   lineage: dict[str, str], run_id: str, holdout: dict[str, Any] | None = None,
-                  extra_degraded: list[str] | None = None, evidence_class: str | None = None) -> dict[str, Any]:
+                  extra_degraded: list[str] | None = None, evidence_class: str | None = None, research: dict[str, Any] | None = None) -> dict[str, Any]:
     ppy = cfg.evaluation.periods_per_year
     rf = ev.risk_free()
     sessions = [s for o in ev.manifest.outer for s in o.test.valuation_sessions]
@@ -197,6 +197,7 @@ def build_context(cfg: Config, ev: Evaluator, outcomes: list[PassOutcome], outer
                     "statement": (h.get("statement") or "The final holdout is sealed: no holdout outcome has been read, used for selection, or "
                                   "reported. It can be opened once, with an explicit acknowledgement, after this report is complete.")},
         "degraded": degraded_conditions(outcomes, lineage, extra_degraded, fixture, synthetic),
+        "research": research,
     }
     return ctx
 

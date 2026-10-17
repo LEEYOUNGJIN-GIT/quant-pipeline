@@ -175,7 +175,8 @@ def open_holdout(p: FixturePipeline, *, unlock: bool, environ: Mapping[str, str]
         for r in rows], "statement": (f"The final holdout was opened once (audit {audit['audit_hash'][:19]}) with the hyperparameters frozen "
                                       "before it was touched; forward refits used only observations available at their cutoffs. "
                                       "The pre-holdout report above is unchanged and no selection used these results.")}
-    ctx = build_context(p.cfg, p.ev, p.outcomes, p.outer_runs, p.summary, p.lineage, p.run_id, holdout=h, evidence_class=p.evidence_class)
+    ctx = build_context(p.cfg, p.ev, p.outcomes, p.outer_runs, p.summary, p.lineage, p.run_id, holdout=h, evidence_class=p.evidence_class,
+                       research=p._report_extra(p.outcomes, p.outer_runs))
     md, html = render(ctx)
     scan = scan_terminology(md + "\n" + html, inferential=p.cfg.bootstrap.intervals_are_inferential)
     p.store.write(p.key("12_bootstrap_and_reports", "global", "post-holdout"),

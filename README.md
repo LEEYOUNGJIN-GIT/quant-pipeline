@@ -53,11 +53,31 @@ QUANT_FINAL_HOLDOUT_ACK=I_UNDERSTAND_THIS_OPENS_THE_FINAL_HOLDOUT \
 Opening is allowed once per lineage, needs the frozen selection and a valid pre-holdout state, writes an audit record and proves the
 pre-holdout artifacts unchanged. A second attempt is refused.
 
-## Data collection (optional step, not run in this repository's CI)
+## Real-data research run on GitHub Actions
 
-`quant-pipeline data fetch` materializes an immutable snapshot from a provider adapter. The repository is public and provider data is
-generally not redistributable, so `data/snapshots/`, `data/cache/` and `outputs/runs/` are git-ignored. Do not commit them; do not print raw data in
-logs.
+The sandbox and a laptop are not required: the data collection and the long run happen on GitHub-hosted runners, in this order (each is a manually
+started workflow). The repository is **public** and provider data is not redistributable, so a snapshot and every run product leave a job only as an
+AES-256 encrypted artifact, and logs carry aggregate statistics only.
+
+One-time setup (repository settings, Secrets and variables, Actions):
+
+| Secret | What |
+|---|---|
+| `ECOS_API_KEY` | free key from the Bank of Korea ECOS Open API (the KRW overnight rate) |
+| `SNAPSHOT_PASSPHRASE` | any long random string; it encrypts the snapshot and run artifacts |
+
+Confirm yourself that the terms of Yahoo Finance (via `yfinance`), ECOS and FRED allow your intended use; this repository cannot decide that for you.
+
+| Step | Workflow | Result |
+|---|---|---|
+| 1 | `research-data` | collects Yahoo prices and FX plus the ECOS rate, prints the data-quality report, runs `data validate`, uploads the encrypted snapshot |
+| 2 | `research-run` (input: the step-1 run id) | trial paths on parallel runners (shards), merge, finish up to the pre-holdout report; resumable |
+| 3 | `research-holdout` (inputs: both run ids and the exact acknowledgement text) | opens the final holdout once; refuses a second opening |
+
+`research-scale-sharded` rehearses steps 2 on synthetic data of the real size without secrets (it also runs when its file changes). Verify any run
+directory with `python tools/verify_artifacts.py <run dir> [--compare <other run dir>]`.
+
+Locally, `quant-pipeline data fetch --provider yfinance` needs the `research-online` extra and `ECOS_API_KEY`; without them it refuses with a clear message.
 
 ## Verification
 
