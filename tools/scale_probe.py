@@ -26,6 +26,7 @@ def main() -> int:
     ap.add_argument("--end", default="2024-12-31")
     ap.add_argument("--stop-after", type=int, default=None)
     ap.add_argument("--plan-only", action="store_true")
+    ap.add_argument("--build-only", action="store_true", help="only write the synthetic repository and print its root (deterministic: every job builds the same snapshot id)")
     ap.add_argument("--json-out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -42,6 +43,9 @@ def main() -> int:
     (root / "configs").mkdir(exist_ok=True)
     shutil.copy(ROOT / "configs" / "research_8_12asset.yaml", root / "configs" / "research_8_12asset.yaml")
     t_build = time.time() - t0
+    if args.build_only:
+        print(f"REPO_ROOT={root}")
+        return 0
 
     t1 = time.time()
     p = ResearchPipeline(root, root / "out", "scale", config="configs/research_8_12asset.yaml", stop_after=args.stop_after, allow_synthetic=True)
