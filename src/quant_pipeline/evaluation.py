@@ -105,7 +105,7 @@ class Evaluator:
         self.engine = PathEngine(cfg, md, cals, sess, rm, regime, hashes, caches)
         self.design = enumerate_trials(cfg)
         self.defaults = {k: self.design.trials[0]["parameters"][k] for k in self.design.trials[0]["parameters"]}
-        self.defaults = {name: fn(cfg)[0] for name, fn in __import__("quant_pipeline.trials", fromlist=["x"]).TRIAL_DIMENSIONS.items()}
+        self.defaults = {name: fn(cfg)[0] for name, fn in __import__("quant_pipeline.trials", fromlist=["x"]).trial_dimensions(cfg).items()}
         self.counts = Counts()
         self.registry = TrialRegistry("run", cfg.evaluation.max_parameter_trials)
         self._rf: dict[str, float] | None = None
@@ -135,7 +135,7 @@ class Evaluator:
         r = self.engine.run(label=label, fold_id=label, trial=to_trial_params(self.cfg, t["parameters"]), trial_hash=h, multiplier=1.0,
                             start=1, end=last, opening=self.opening)
         self.counts.executed_paths += 1
-        self.counts.executed_decisions += last
+        self.counts.executed_decisions += self.engine.decisions_upto(last)
         return r
 
     def run_trial_paths(self) -> dict[str, PathResult]:
@@ -180,7 +180,7 @@ class Evaluator:
                 e = self.score_block(paths[t["trial_hash"]], f.validation, t["trial_hash"], p.name, f)
                 evals.append(e)
                 self.counts.trial_fold_evaluations += 1
-                self.counts.no_sharing_replayed_decisions += f.path_end
+                self.counts.no_sharing_replayed_decisions += self.engine.decisions_upto(f.path_end)
                 self.registry.register(f"{p.name}:inner{f.index}", t["trial_hash"], "completed", score=e.score, eligible=e.eligible)
         by_trial: dict[str, list[InnerEvaluation]] = {}
         for e in evals:

@@ -1,7 +1,7 @@
 # {{ title }}
 
 > **Status: {{ status_banner }}**
-> Synthetic fixture data. Results demonstrate implementation properties only; they make no claim about any market, about future returns, or about statistical strength.
+> {{ data_note }}
 
 - Specification version: `{{ spec_version }}` · profile: `{{ profile }}` · run: `{{ run_id }}`
 - Lineage: spec `{{ lineage.spec_hash[:19] }}` · config `{{ lineage.config_hash[:19] }}` · data `{{ lineage.data_manifest_hash[:19] }}` · code `{{ lineage.code_hash[:19] }}` · lock `{{ lineage.lock_hash }}`
@@ -62,7 +62,7 @@ This reference is exempt from the ordinary turnover limit at its single initial 
 
 ## 6. Uncertainty
 
-Method: {{ uncertainty.method }}, mean block length {{ uncertainty.block_length }}, {{ uncertainty.replicates }} replicates over the {{ uncertainty.shape }} index matrix (hash `{{ uncertainty.index_hash[:19] }}`). **Status: {{ uncertainty.inference_label }}** — the fixture bootstrap is a deterministic smoke test; its intervals are not inferential and the holdout is excluded.
+Method: {{ uncertainty.method }}, mean block length {{ uncertainty.block_length }}, {{ uncertainty.replicates }} replicates over the {{ uncertainty.shape }} index matrix (hash `{{ uncertainty.index_hash[:19] }}`). **Status: {{ uncertainty.inference_label }}** — {{ uncertainty.note }}
 
 | series | point Sharpe | interval low | interval high |
 |---|---|---|---|
@@ -75,7 +75,7 @@ Method: {{ uncertainty.method }}, mean block length {{ uncertainty.block_length 
 
 {{ holdout.statement }}
 {% if holdout.opened %}
-Holdout (10 decisions, {{ holdout.intervals }} valuation intervals; not part of the bootstrap or any selection):
+Holdout ({{ holdout.decisions }} decisions, {{ holdout.intervals }} valuation intervals; not part of the bootstrap or any selection):
 
 | series | label | total return | ann. net-excess Sharpe | max drawdown |
 |---|---|---|---|---|
@@ -89,5 +89,22 @@ Holdout (10 decisions, {{ holdout.intervals }} valuation intervals; not part of 
 ## 9. Model limitations
 
 - The daily XNYS-anchored panel is an operational synchronization approximation, not a simultaneous cross-market covariance; lead-lag and stale-information bias remain.
-- The fixture decision lane uses a fixed regime table; the hidden-Markov path is exercised only by an integration probe against an independent oracle.
-- Data are synthetic. No statement here concerns real markets.
+- {{ limitation_regime }}
+- {{ limitation_data }}
+{% if research %}
+## 10. Research data, monthly decisions and regime fits
+
+Snapshot `{{ research.snapshot_id[:19] }}` from provider `{{ research.provider }}`, window {{ research.window }}, {{ research.assets|length }} assets: {{ research.assets|join(", ") }}.
+
+Data terms and assumptions: {{ research.license }}
+
+### 10.1 Monthly decisions in the scored outer folds (strategy, 1x costs)
+
+| fold | decision | cutoff (UTC) | risky share | cash | orders | one-way turnover | branch | censored |
+|---|---|---|---|---|---|---|---|---|
+{% for d in research.decisions %}| {{ d.fold }} | {{ d.decision }} | {{ d.cutoff }} | {{ "%.4f"|format(d.risky) }} | {{ "%.4f"|format(d.cash) }} | {{ d.orders }} | {{ "%.4f"|format(d.turnover) }} | {{ d.branch }} | {{ d.censored }} |
+{% endfor %}
+### 10.2 Hidden-Markov regime fits
+
+{{ research.hmm.n_fits }} fits across {{ research.hmm.refits }} refit positions; every fit converged: **{{ research.hmm.all_converged }}**. Only the forward-filtered state is used (no smoothing); the fit seed stream is `{{ research.hmm.seed_stream }}`.
+{% endif %}

@@ -65,6 +65,21 @@ def build_output(*, fold_id: str, refit_id: str, as_of: datetime, name: AgentNam
 
 
 @dataclass(frozen=True)
+class History:
+    """The complete-case history of the whole snapshot for one asset order. Any series whose value at row ``t`` uses only rows ``<= t`` is the
+    same on every context's prefix as on this history, so it may be computed once here (into ``memo``) and sliced; nothing later than a
+    context's own decision row is ever read from a slice."""
+
+    returns: NDArray[np.float64]
+    illiquid: NDArray[np.float64]
+    memo: dict = field(default_factory=dict, compare=False, repr=False)
+
+    def is_prefix(self, returns: NDArray[np.float64]) -> bool:
+        n = returns.shape[0]
+        return 0 < n <= self.returns.shape[0] and bool(np.array_equal(self.returns[n - 1], returns[-1]))
+
+
+@dataclass(frozen=True)
 class AgentContext:
     """Everything an agent may read at one decision: causal history up to the cutoff plus the frozen fold fit."""
 
@@ -83,3 +98,4 @@ class AgentContext:
     train_start_row: int  # first training-decision row index
     illiquid_history: NDArray[np.float64] | None = None  # fraction of assets not tradable at each history row
     row_cutoffs: tuple[str, ...] = ()  # decision cutoff (UTC) of each complete-case history row
+    history: History | None = field(default=None, compare=False, repr=False)  # the whole snapshot's history this context is a prefix of (only for memoizing prefix-stable series)

@@ -50,6 +50,7 @@ class TrialParams:
     lambda_track: float
     lambda_risk: float
     lambda_cost: float
+    n_components: int | None = None  # research trial dimension (OQ-043); None = the profile's first candidate (the fixture's only one)
 
     @classmethod
     def first(cls, cfg: Config, gate_name: str | None = None) -> TrialParams:
@@ -74,8 +75,18 @@ def pressure_components(cfg: Config, ctx: A.AgentContext) -> tuple[dict[str, flo
     """Observed pressure at the last row against thresholds fitted from this context's training rows only."""
     rp = cfg.risk_pressure_calibration
     ill = ctx.illiquid_history if ctx.illiquid_history is not None else np.zeros(len(ctx.returns))
-    series = metric_series(ctx.returns, ill, drawdown_window=cfg.features.drawdown_window, factor_window=rp.factor_window_rows,
-                           factor_min_obs=rp.factor_min_observations, first_row=ctx.train_start_row)
+    args = {"drawdown_window": cfg.features.drawdown_window, "factor_window": rp.factor_window_rows, "factor_min_obs": rp.factor_min_observations,
+            "first_row": ctx.train_start_row}
+    if ctx.history is None:
+        series = metric_series(ctx.returns, ill, **args)
+    else:  # row u of every metric uses only rows <= u, so one pass over the whole history serves every context as a prefix
+        n = len(ctx.returns)
+        if ctx.history.returns.shape[0] < n or not np.array_equal(ctx.history.returns[n - 1], ctx.returns[-1]):
+            raise ValueError("the context is not a prefix of its history")
+        key = ("metric_series", *args.values())
+        if key not in ctx.history.memo:
+            ctx.history.memo[key] = metric_series(ctx.history.returns, ctx.history.illiquid, **args)
+        series = {k: v[: len(ctx.returns)] for k, v in ctx.history.memo[key].items()}
     last = len(ctx.returns) - 1
     names = (("market_drawdown_magnitude", "drawdown"), ("first_pca_variance_share", "factor"), ("illiquid_fraction", "liquidity"))
     comps, ths = {}, {}

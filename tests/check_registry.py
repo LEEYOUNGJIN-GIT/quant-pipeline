@@ -19,12 +19,15 @@ REGISTRY: dict[str, dict[str, Any]] = {
                     "gaps": []},
     "INV-HASH-001": {"tier": "V0", "scope": "independent_oracle", "tests": [U + "test_independent_hashes.py", G + "test_jcs_rfc8785.py", U + "test_config.py"],
                      "gaps": []},
-    "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_cli.py::test_data_validate"],
-                     "gaps": ["the research profile cannot run: no immutable research snapshot, monthly row map or HMM decision lane exists"]},
+    "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py", U + "test_research_engine.py", U + "test_hmm_lane.py", U + "test_research_trials.py",
+                                                                  I + "test_research_pipeline.py", I + "test_research_invariance.py", I + "test_research_holdout.py",
+                                                                  I + "test_research_sharding.py", U + "test_daily_view.py",
+                                                                  U + "test_cli.py::test_data_validate"],
+                     "gaps": [("the research pipeline runs end to end only as a reduced engineering test on a SYNTHETIC snapshot; the full research profile has never been "
+                              "executed (24 h compute budget, no licensed snapshot), so no research result exists; the holdout opening procedure is exercised only on that same synthetic run")]},
     "INV-DATA-002": {"tier": "V0", "scope": "fixture_path", "tests": [U + "test_fixture_data.py::test_split_is_neutral", U + "test_fixture_data.py::test_raw_and_total_return",
-                                                                  U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate"],
-                     "gaps": [("spec 4.3 reconciliation levels 2 and 3 (provider total-return reconstruction; executable ledger versus adjusted research series) "
-                              "and their per-asset invalidation / halt scope are not implemented")]},
+                                                                  U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate",
+                                                                  U + "test_reconciliation.py"], "gaps": []},
     "INV-CAL-001": {"tier": "V0", "scope": "independent_oracle", "tests": [G + "test_oracle.py::test_calendar", I + "test_phase1_vs_oracle.py::test_calendar_table",
                                                                         U + "test_fixture_data.py::test_geometry"], "gaps": []},
     # ---- V1 ------------------------------------------------------------------------------------------------------
@@ -46,8 +49,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
                                                                          I + "test_phase5_engine.py::test_full_path_is_self_financing"], "gaps": []},
     "INV-FIX-001": {"tier": "V1", "scope": "fixture_path", "tests": [BB + "test_fixture_fresh_context.py::test_the_denial_hook", U + "test_coverage.py", I + "test_phase6_holdout.py::test_the_coverage_matrix", U + "test_fixture_data.py"],
                     "gaps": []},
-    "INV-FETCH-001": {"tier": "V1", "scope": "static", "tests": [U + "test_cli.py::test_static_doctor"],
-                      "gaps": ["the collector (`data fetch`), provider cache, rate limiting and fetch-failure report are not implemented"]},
+    "INV-FETCH-001": {"tier": "V1", "scope": "static", "tests": [U + "test_cli.py::test_static_doctor", U + "test_collector.py", U + "test_live_adapters.py", I + "test_live_roundtrip.py"], "gaps": []},
     "INV-VAL-001": {"tier": "V1", "scope": "fixture_path", "tests": [I + "test_phase1_vs_oracle.py::test_valuation", I + "test_phase1_vs_oracle.py::test_stale", I + "test_phase1_vs_oracle.py::test_research_stale",
                                                                     U + "test_splits.py"], "gaps": []},
     # ---- V2 ------------------------------------------------------------------------------------------------------
@@ -88,7 +90,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
                                                                           I + "test_phase5_evaluation.py::test_each_pass", I + "test_phase5_evaluation.py::test_known_gap", G + "test_bootstrap_trials.py::test_selection",
                                                                           G + "test_bootstrap_trials.py::test_ties", G + "test_bootstrap_trials.py::test_scores_outside", G + "test_bootstrap_trials.py::test_ineligible"],
                     "gaps": [], "xfail_is_gap": True},
-    "INV-HOLD-001": {"tier": "V3", "scope": "fixture_path", "tests": [I + "test_phase6_holdout.py"], "gaps": []},
+    "INV-HOLD-001": {"tier": "V3", "scope": "fixture_path", "tests": [I + "test_phase6_holdout.py", I + "test_research_holdout.py"], "gaps": []},
     "INV-COST-001": {"tier": "V3", "scope": "fixture_path", "tests": [I + "test_phase5_engine.py::test_cost_scenarios", I + "test_phase5_evaluation.py::test_cost_scenarios", I + "test_phase6_holdout.py::test_three_cost"], "gaps": []},
     "INV-BENCH-001": {"tier": "V3", "scope": "fixture_path", "tests": [U + "test_benchmarks.py", I + "test_phase5_benchmarks.py", I + "test_phase5_evaluation.py::test_benchmarks_are"], "gaps": []},
     "INV-STAT-001": {"tier": "V3", "scope": "independent_oracle", "tests": [G + "test_bootstrap_trials.py::test_bootstrap", G + "test_bootstrap_trials.py::test_stationary", G + "test_bootstrap_trials.py::test_the_aligned",
@@ -101,8 +103,8 @@ REGISTRY: dict[str, dict[str, Any]] = {
     # ---- V4 ------------------------------------------------------------------------------------------------------
     "INV-CHK-002": {"tier": "V4", "scope": "fixture_path", "tests": [I + "test_phase5_resume.py", BB + "test_fixture_fresh_context.py::test_two_clean_runs"], "gaps": []},
     "INV-BLACKBOX-001": {"tier": "V4", "scope": "independent_oracle", "tests": [BB + "test_fixture_fresh_context.py", G + "test_hmm_pipeline.py::test_probe_in_a_fresh_subprocess"],
-                         "gaps": [("the network-denial hook is Python-level only (no OS network namespace); verify.py is not executed inside the fresh context; "
-                                  "the regression snapshot was generated from this implementation's own output (labeled reviewed_regression, not an oracle)")]},
+                         "gaps": [("the regression snapshot was generated from this implementation's own output (labeled reviewed_regression, not an oracle); "
+                                  "this cannot be closed by code. The OS network namespace is used only where the runner permits it and is otherwise recorded as unavailable")]},
     "INV-GOV-001": {"tier": "V4", "scope": "static", "tests": [U + "test_capability.py"], "special": ["ci_provenance"], "gaps": []},
     "INV-VERIFY-001": {"tier": "V4", "scope": "static", "tests": [U + "test_verify_tool.py"], "special": ["self"], "gaps": []},
     # ---- documents -----------------------------------------------------------------------------------------------

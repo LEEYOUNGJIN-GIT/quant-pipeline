@@ -18,6 +18,7 @@ from .data import MarketData
 from .event_time import Event, asset_exchange
 from .fx import krw_value
 from .rates import RateCurve, accrue
+from .reconciliation import split_quantity
 
 ZERO = Decimal(0)
 
@@ -116,10 +117,9 @@ class LedgerRunner:
             if p["phase"] == "ex":
                 self.entitlement[e.order_id.removesuffix("-ex")] = self.ledger.holdings.get(e.asset_id, 0)
                 if p["action_type"] == "split":
-                    scaled = self.ledger.holdings[e.asset_id] * int(p["num"])
-                    if scaled % int(p["den"]):
-                        raise RuntimeError("fractional split quantity is unsupported; halt (spec 4.3)")
-                    self.ledger.holdings[e.asset_id] = scaled // int(p["den"])
+                    self.ledger.holdings[e.asset_id] = split_quantity(
+                        self.ledger.holdings[e.asset_id], int(p["num"]), int(p["den"]),
+                        self.cfg.accounting.corporate_action_reconciliation.split_relative_tolerance)  # level 1: halts on a residual above tolerance
                     note = "split_quantity_adjust"
             else:  # dividend pay: the quantity held at the ex event, credited in KRW at the latest available FX
                 fx = self.md.fx_mark(e.ts)

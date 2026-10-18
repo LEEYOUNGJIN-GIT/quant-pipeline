@@ -1,12 +1,14 @@
 """Trend agent: weighted lagged total returns divided by trailing volatility, clipped (spec 8.2)."""
 from __future__ import annotations
 
+import bisect
+
 import numpy as np
 from numpy.typing import NDArray
 
 from ..config import Config
 from ..risk_pressure import type7_quantile
-from .base import AgentContext, AgentOutput, build_output
+from .base import AgentContext, AgentOutput, History, build_output
 
 
 def scores_at(returns: NDArray[np.float64], t: int, horizons: list[int], weights: list[float], vol_window: int,
@@ -27,15 +29,35 @@ def scores_at(returns: NDArray[np.float64], t: int, horizons: list[int], weights
     return np.clip(total / vol, -clip_z, clip_z), coverage
 
 
-def positive_mass_reference(returns: NDArray[np.float64], cfg: Config, weights: list[float], start: int, end: int) -> float:
-    """Type-7 median of strictly positive score mass over training-only decisions, floored by ``score_mass_floor``."""
+def _masses(returns: NDArray[np.float64], cfg: Config, weights: list[float], start: int, end: int) -> tuple[list[int], list[float]]:
+    """(rows, positive score mass) for every row in ``start..end`` that has full horizon coverage and a positive mass."""
     f = cfg.features
-    masses = []
+    rows, masses = [], []
     for t in range(start, end + 1):
         s, cov = scores_at(returns, t, f.return_horizons, weights, f.volatility_window, f.clip_z, f.min_observations)
         mass = float(np.clip(s, 0.0, None).sum())
         if cov >= 1.0 and mass > 0.0:
+            rows.append(t)
             masses.append(mass)
+    return rows, masses
+
+
+def positive_mass_reference(returns: NDArray[np.float64], cfg: Config, weights: list[float], start: int, end: int,
+                            history: History | None = None) -> float:
+    """Type-7 median of strictly positive score mass over training-only decisions, floored by ``score_mass_floor``.
+
+    The mass at row ``t`` uses rows ``<= t`` only, so with a ``history`` the masses are computed once over the whole history and the ones up to
+    ``end`` are taken: exactly the list a fresh pass over ``returns`` would build.
+    """
+    f = cfg.features
+    if history is not None and history.is_prefix(returns) and end < history.returns.shape[0]:
+        key = ("trend_mass", start, tuple(weights), tuple(f.return_horizons), f.volatility_window, f.clip_z, f.min_observations)
+        if key not in history.memo:
+            history.memo[key] = _masses(history.returns, cfg, weights, start, history.returns.shape[0] - 1)
+        rows, all_masses = history.memo[key]
+        masses = all_masses[: bisect.bisect_right(rows, end)]
+    else:
+        masses = _masses(returns, cfg, weights, start, end)[1]
     return max(type7_quantile(np.array(masses), 0.5), f.score_mass_floor) if masses else f.score_mass_floor
 
 
@@ -44,7 +66,7 @@ def run(ctx: AgentContext, cfg: Config, horizon_weights: list[float] | None = No
     w = horizon_weights or a.horizon_weight_candidates[0]
     t = ctx.returns.shape[0] - 1
     raw, coverage = scores_at(ctx.returns, t, f.return_horizons, w, f.volatility_window, f.clip_z, f.min_observations)
-    ref = positive_mass_reference(ctx.returns, cfg, w, ctx.train_start_row, ctx.train_end_row)
+    ref = positive_mass_reference(ctx.returns, cfg, w, ctx.train_start_row, ctx.train_end_row, ctx.history)
     mass = float(np.clip(np.where(ctx.tradable, raw, 0.0), 0.0, None).sum())
     confidence = coverage * min(1.0, mass / ref)
     return build_output(fold_id=ctx.fold_id, refit_id=ctx.refit_id, as_of=ctx.as_of, name="Trend", assets=ctx.assets,

@@ -229,11 +229,23 @@ def plan(config: CONFIG_OPT, run_id: Annotated[str | None, typer.Option("--run-i
 
     root = repo_root.resolve()
     cfg = load_config(config)
+    window = None
     if cfg.data.mode != "fixture":
-        typer.echo("plan for snapshot (research) profiles needs the research row map, which is not implemented yet", err=True)
-        raise typer.Exit(2)
+        from .calendars import window_from_manifest
+        from .snapshot import SnapshotResolutionError, load_research_context
+
+        try:
+            cfg, snap = load_research_context(cfg, root)
+        except SnapshotResolutionError as e:
+            typer.echo(f"plan refused: {e}", err=True)
+            raise typer.Exit(2) from e
+        window = window_from_manifest(snap.manifest)
     cals = Calendars.load(list(cfg.calendars.required))
-    rm, _ = build_row_map(cfg, cals)
+    try:
+        rm, _ = build_row_map(cfg, cals, window)
+    except ValueError as e:
+        typer.echo(f"plan refused: {e}", err=True)
+        raise typer.Exit(2) from e
     manifest = build_split_manifest(cfg, cals, rm)
     plan_doc = build_compute_plan(cfg, manifest, enumerate_trials(cfg), lineage_hashes(cfg, root))
     path = write_plan(root / cfg.paths.output_root, run_id or "plan", plan_doc)
@@ -271,6 +283,7 @@ def run(config: CONFIG_OPT, run_id: Annotated[str, typer.Option("--run-id")] = "
 @holdout_app.command("open")
 def holdout_open(config: CONFIG_OPT, run_id: Annotated[str, typer.Option("--run-id")],
                  unlock_final_holdout: Annotated[bool, typer.Option("--unlock-final-holdout")] = False,
+                 allow_synthetic: Annotated[bool, typer.Option("--allow-synthetic", help="engineering tests only: accept a synthetic research snapshot")] = False,
                  repo_root: Annotated[Path, typer.Option("--repo-root", hidden=True)] = Path()) -> None:
     """Open the sealed holdout once. Needs the flag, the acknowledgement variable and a complete pre-holdout report."""
     from .holdout import HoldoutRefused, open_holdout
@@ -278,7 +291,16 @@ def holdout_open(config: CONFIG_OPT, run_id: Annotated[str, typer.Option("--run-
 
     root = repo_root.resolve()
     cfg = load_config(config)
-    pipe = FixturePipeline(root, root / cfg.paths.output_root, run_id, config=str(config))
+    if cfg.regime.mode == "hmm_filtered":  # the research lane: snapshot, HMM-filtered regimes
+        from .research_pipeline import ResearchPipeline, SyntheticSnapshotRefused
+
+        try:
+            pipe = ResearchPipeline(root, root / cfg.paths.output_root, run_id, config=str(config), allow_synthetic=allow_synthetic)
+        except SyntheticSnapshotRefused as e:
+            typer.echo(f"holdout NOT opened: {e}", err=True)
+            raise typer.Exit(1) from e
+    else:
+        pipe = FixturePipeline(root, root / cfg.paths.output_root, run_id, config=str(config))
     try:
         result = open_holdout(pipe, unlock=unlock_final_holdout)
     except HoldoutRefused as e:
@@ -300,6 +322,54 @@ def data_validate(config: CONFIG_OPT, repo_root: Annotated[Path, typer.Option("-
         typer.echo(f"{'ok  ' if r['status'] == 'pass' else 'FAIL'} {r['check']}: {r['detail']}")
     typer.echo(f"data validate: {'fail' if failed else 'pass'} ({len(results)} checks)")
     raise typer.Exit(1 if failed else 0)
+
+
+@data_app.command("fetch")
+def data_fetch(
+    config: CONFIG_OPT,
+    provider: Annotated[str, typer.Option("--provider", help="yfinance (Yahoo prices and FX plus the ECOS overnight rate; needs ECOS_API_KEY and the research-online extra) or local_files")],
+    start: Annotated[str, typer.Option("--start", help="YYYY-MM-DD")],
+    end: Annotated[str, typer.Option("--end", help="YYYY-MM-DD")],
+    output_snapshot: Annotated[Path, typer.Option("--output-snapshot", help="snapshot directory; <snapshot_id> is replaced by the manifest id")],
+    source_dir: Annotated[Path | None, typer.Option("--source-dir", help="local_files only: directory of canonical parquet files")] = None,
+    license_text: Annotated[str | None, typer.Option("--license", help="local_files only: license of the source data")] = None,
+    repo_root: Annotated[Path, typer.Option("--repo-root", hidden=True)] = Path(),
+) -> None:
+    """Optional collector (spec 4.6): fetch, cache, validate and materialize an immutable research snapshot. Partial success is a failure."""
+    from .collector import ProviderError, SnapshotError, assets_from_manifest, collect, make_provider
+
+    cfg = load_config(config)
+    root = repo_root.resolve()
+    col = cfg.data.collector
+    if cfg.data.mode != "snapshot" or col is None or not cfg.data.universe_manifest:
+        typer.echo("data fetch needs a snapshot profile with data.collector and data.universe_manifest", err=True)
+        raise typer.Exit(2)
+    if not col.enabled:
+        typer.echo("the collector is disabled in this profile (data.collector.enabled: false); enable it explicitly to fetch", err=True)
+        raise typer.Exit(2)
+    try:
+        assets = assets_from_manifest(root / cfg.data.universe_manifest)
+
+        def live():
+            from .live_provider import build_live_provider
+
+            return build_live_provider(cfg, assets)
+
+        prov = make_provider(provider, source_dir=source_dir, license=license_text, live=live)
+        out = output_snapshot if output_snapshot.is_absolute() else root / output_snapshot
+        report = collect(assets, fx_pair=cfg.fx.pair_id, rates_symbol=cfg.cash.source_id, collector=col, provider=prov, start=start, end=end,
+                         output=out, cache_root=root / col.cache_root, jitter_seed=cfg.reproducibility.random_streams.provider_jitter,
+                         universe_source=root / cfg.data.universe_manifest)
+    except (ValueError, OSError, SnapshotError, ProviderError) as e:
+        typer.echo(f"data fetch failed: {e}", err=True)
+        raise typer.Exit(2) from e
+    c = report.cache
+    typer.echo(f"data fetch: {report.status} ({len(report.items)} requests, cache hits {c['hits']}, misses {c['misses']})")
+    for f in report.failures():
+        typer.echo(f"FAIL {f['capability']}/{f['symbol']}: {f['kind']} after {f['attempts']} attempt(s): {f['error']}")
+    if report.status == "success":
+        typer.echo(f"snapshot {report.snapshot_id}")
+    raise typer.Exit(0 if report.status == "success" else 1)
 
 
 if __name__ == "__main__":

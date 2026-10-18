@@ -26,6 +26,7 @@ from .evaluation import BENCHMARK_IDS, Evaluator, OuterCarry
 from .fitstate import lineage_hashes
 from .hashing import hash_json_obj, hash_text
 from .intervals import interval_report
+from .reconciliation import require_clean
 from .regimes import FixedRegimeTable
 from .reporting import build_context, render, scan_terminology
 from .splits import build_split_manifest
@@ -53,10 +54,11 @@ class Progress:
 class FixturePipeline:
     def __init__(self, root: Path, out_root: Path, run_id: str, config: str = "configs/fixture_3asset.yaml", stop_after: int | None = None):
         self.root, self.run_id, self.stop_after = Path(root), run_id, stop_after
-        self.cfg = load_config(self.root / config)
+        self.cfg = self._load_config(self.root / config)
         self.store = CheckpointStore(out_root)
         self.cals = Calendars.load(["XKRX", "XNYS"])
-        self.rm, self.sess = build_row_map(self.cfg, self.cals)
+        self.rm, self.sess = self._build_row_map()
+        require_clean(self.cfg, self.root)  # spec 4.3: a reconciliation breach halts the entire run before any decision
         self.md = load_market_data(self.cfg, self.root)
         hashes = lineage_hashes(self.cfg, self.root)
         self.hashes = hashes
@@ -66,7 +68,7 @@ class FixturePipeline:
         cash, qty, asof = load_initial_holdings(self.cfg, self.root)
         self.opening = Opening(cash, qty, utc(asof))
         self.manifest = build_split_manifest(self.cfg, self.cals, self.rm)
-        regime = FixedRegimeSource(FixedRegimeTable.load(self.root / self.cfg.regime.fixed_table.path))
+        regime = self._regime_source()
         self.ev = Evaluator(self.cfg, self.md, self.cals, self.sess, self.rm, regime, hashes, self.manifest, self.opening)
         self.progress = Progress(out_root / run_id / "progress_log.txt")
         self.written = 0
@@ -76,6 +78,35 @@ class FixturePipeline:
         self.summary: dict = {}
         self.computed: list[str] = []
         self.loaded: list[str] = []
+
+    # ------------------------------------------------------------------------------------------ profile hooks (research overrides)
+    regime_family = "fixed_regime_table"
+    trial_shard: tuple[int, int] | None = None  # (index, count): compute only the trial paths with position % count == index, then stop
+    evidence_class: str | None = None  # the research lane labels synthetic engineering snapshots
+
+    def _load_config(self, path: Path):
+        return load_config(path)
+
+    def _report_extra(self, outcomes, outer) -> dict[str, Any] | None:
+        """Profile-specific report content (the research lane adds data provenance, the monthly decision table and the regime fits)."""
+        return None
+
+    def holdout_binding(self) -> dict[str, Any]:
+        """Extra identity the holdout audit record carries (empty for the fixture lane, so its audit hash is unchanged)."""
+        return {}
+
+    def holdout_evidence(self, final, refits: list[int]) -> dict[str, bytes] | None:
+        """Extra evidence persisted after the holdout is opened (the research lane records the regime fits the holdout used)."""
+        return None
+
+    def _build_row_map(self):
+        return build_row_map(self.cfg, self.cals)
+
+    def _regime_source(self):
+        return FixedRegimeSource(FixedRegimeTable.load(self.root / self.cfg.regime.fixed_table.path))
+
+    def _extra_units(self, k_outer: list[CheckpointKey], k_sel: CheckpointKey) -> list[CheckpointKey]:
+        return []
 
     # ------------------------------------------------------------------------------------------ unit machinery
     def key(self, stage: str, fold: str, trial: str = "none", refit: str = "none") -> CheckpointKey:
@@ -110,11 +141,16 @@ class FixturePipeline:
                                            "oos_intervals.json": S.dumps(interval_report(self.cfg, self.cals, self.rm, self.manifest))})
 
         paths, k_paths = {}, []
-        for t in design.trials:
+        for i, t in enumerate(design.trials):
+            if self.trial_shard is not None and i % self.trial_shard[1] != self.trial_shard[0]:
+                continue  # another shard's trial: independent isolated paths, merged by copying their checkpoints
             k = self.key("10_event_time_execution_and_accounting", "selection", t["trial_hash"][7:19])
             k_paths.append(k)
             art = self.unit(k, [k_cfg], lambda t=t: S.path_to_artifacts(self.ev.run_trial_path(t)), {"trial_hash": t["trial_hash"]})
             paths[t["trial_hash"]] = S.path_from_artifacts(art)
+        if self.trial_shard is not None:
+            self.progress.note(f"shard {self.trial_shard[0]}/{self.trial_shard[1]} complete: {len(k_paths)} trial paths")
+            return {"trial_shard": list(self.trial_shard), "trial_paths": len(k_paths)}
 
         k_sel = self.key("11_oos_evaluation", "selection")
         art = self.unit(k_sel, k_paths, lambda: {"outcomes.json": S.dumps([S.outcome_to_obj(o) for o in self.ev.selection_from_paths(paths)])})
@@ -146,6 +182,7 @@ class FixturePipeline:
             final_carry[mult] = carry
 
         self.outcomes, self.outer_runs, self.final_carry = outcomes, outer, final_carry
+        k_extra = self._extra_units(k_outer, k_sel)
         k_final = self.key("11_oos_evaluation", "final", "freeze")
         art = self.unit(k_final, [k_sel], lambda: {"final_selection.json": S.dumps(self._final_selection(by_name["final"]))},
                         {"winner": by_name["final"].winner_hash})
@@ -155,7 +192,7 @@ class FixturePipeline:
         art = self.unit(k_sum, k_outer, lambda: {"summary.json": S.dumps(self._summary(outer[1.0]))})
         self.summary = S.loads(art["summary.json"])
         k_cov = self.key("13_verification", "global", "coverage")
-        planned = [k_cfg, *k_paths, k_sel, *k_outer, k_final, k_diag, k_sum, k_cov, self.key("12_bootstrap_and_reports", "global", "pre-holdout")]
+        planned = [k_cfg, *k_paths, k_sel, *k_outer, *k_extra, k_final, k_diag, k_sum, k_cov, self.key("12_bootstrap_and_reports", "global", "pre-holdout")]
         self.unit(k_cov, [k_sum, k_diag], lambda: {"fixture_coverage.json": S.dumps(self._coverage(outcomes, outer, planned))})
         k_rep = self.key("12_bootstrap_and_reports", "global", "pre-holdout")
         self.unit(k_rep, [k_sum, k_final], lambda: self._pre_holdout_report(outcomes, outer, self.summary))
@@ -179,17 +216,18 @@ class FixturePipeline:
         is produced only when the holdout is opened."""
         from .diagnostics import scope_report
 
-        scopes = {"calibration": list(range(1, self.manifest.passes[-1].train_end + 1)),
+        scopes = {"calibration": [p for p in self.manifest.decision_positions if p <= self.manifest.passes[-1].train_end],
                   "outer_oos": [p for o in self.manifest.outer for p in o.test.decision_positions]}
         return scope_report(self.ev.engine, scopes, to_trial_params(self.cfg, final.winner_parameters))
 
     def _final_selection(self, final) -> dict[str, Any]:
         """Everything the holdout is allowed to use, frozen before it is touched (spec 11.6)."""
         cfg = self.cfg
-        gate = cfg.regime.agent_gate_candidates[0]
+        gate_name = final.winner_parameters.get("regime.agent_gate_candidates")  # a research trial dimension; the fixture has one gate
+        gate = next((g for g in cfg.regime.agent_gate_candidates if g.name == gate_name), cfg.regime.agent_gate_candidates[0])
         return {
             "frozen": True, "holdout_sealed": True, "created_before_holdout_access": True,
-            "model_family": ["Trend", "MeanReversion", "Defensive", "Diversification", "PCA", "LedoitWolf", "fixed_regime_table"],
+            "model_family": ["Trend", "MeanReversion", "Defensive", "Diversification", "PCA", "LedoitWolf", self.regime_family],
             "trial_hash": final.winner_hash, "parameters": final.winner_parameters, "ranking": list(final.selection.ranking),
             "selection_margin": final.selection.margin, "tie_path": list(final.selection.tie_path),
             "gate_table": {"name": gate.name, "family": gate.family, "by_state_label": gate.by_state_label},
@@ -204,9 +242,10 @@ class FixturePipeline:
             "lineage": self.lineage}
 
     def _pre_holdout_report(self, outcomes, outer, summary) -> dict[str, bytes]:
-        ctx = build_context(self.cfg, self.ev, outcomes, outer, summary, self.lineage, self.run_id)
+        ctx = build_context(self.cfg, self.ev, outcomes, outer, summary, self.lineage, self.run_id, evidence_class=self.evidence_class,
+                            research=self._report_extra(outcomes, outer))
         md, html = render(ctx)
-        scan = scan_terminology(md + "\n" + html)
+        scan = scan_terminology(md + "\n" + html, inferential=self.cfg.bootstrap.intervals_are_inferential)
         if scan["forbidden"] or scan["missing"]:
             raise ValueError(f"report failed the terminology scan: {scan}")
         return {"report.md": md.encode("utf-8"), "report.html": html.encode("utf-8"), "terminology_scan.json": S.dumps(scan),
