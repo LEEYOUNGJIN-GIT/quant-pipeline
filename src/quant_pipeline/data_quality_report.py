@@ -48,7 +48,7 @@ def instrument_report(symbol: str, exchange: str, raw: pd.DataFrame, actions: pd
         "zero_volume_sessions": int((raw.quality_flag != "ok").sum()),
         # official session dates (calendar facts, not provider data) without a usable bar, to tell provider gaps from calendar mismatches
         "missing_sessions_by_year": {str(y): int(n) for y, n in pd.Series(sessions[~present].year).value_counts().sort_index().items()},
-        "missing_sessions_first": [str(d.date()) for d in sessions[~present][:40]],
+        "missing_sessions_first": [str(d.date()) for d in sessions[~present][:60]],
         "dividends": len(divs), "dividends_per_year": round(per_year, 3), "splits": len(split_days),
         "max_abs_daily_return_excluding_splits": round(float(plain.abs().max()), 4) if len(plain) else 0.0,
     }

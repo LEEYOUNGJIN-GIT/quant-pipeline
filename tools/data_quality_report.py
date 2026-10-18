@@ -26,7 +26,7 @@ def main() -> int:
         print(f"{i['symbol']:>10} {i['exchange']} bars={i['bars']} cov={i['session_coverage']:.4f} gap={i['max_consecutive_missing_sessions']} "
               f"div/yr={i['dividends_per_year']} splits={i['splits']} maxmove={i['max_abs_daily_return_excluding_splits']}")
     for i in report["instruments"]:
-        if i["missing_sessions_by_year"] and i["failures"]:
+        if i["missing_sessions_by_year"]:
             print(f"{i['symbol']:>10} missing sessions by year: {i['missing_sessions_by_year']}")
             print(f"{i['symbol']:>10} first missing: {' '.join(i['missing_sessions_first'])}")
     print("fx:", {k: v for k, v in report["fx"].items() if k != "failures"})
