@@ -71,7 +71,7 @@ Confirm yourself that the terms of Yahoo Finance (via `yfinance`), ECOS and FRED
 | Step | Workflow | Result |
 |---|---|---|
 | 1 | `research-data` | collects Yahoo prices and FX plus the ECOS rate, prints the data-quality report, runs `data validate`, uploads the encrypted snapshot |
-| 2 | `research-run` (input: the step-1 run id) | trial paths on parallel runners (shards), merge, finish up to the pre-holdout report; resumable |
+| 2 | `research-run` (input: the step-1 run id) | trial paths on parallel runners (shards), merge, finish up to the pre-holdout report, then verify the artifacts and print an aggregate summary; resumable; `compare_workflow_run_id` compares byte for byte with an earlier run |
 | 3 | `research-holdout` (inputs: both run ids and the exact acknowledgement text) | opens the final holdout once; refuses a second opening |
 
 `research-scale-sharded` rehearses steps 2 on synthetic data of the real size without secrets (it also runs when its file changes). Verify any run
