@@ -363,13 +363,20 @@ class FetchReport:
         return (json.dumps(body, sort_keys=True, indent=1) + "\n").encode("utf-8")
 
 
+RATES_LOOKBACK_DAYS = 14  # calendar days; a rate is published a business day after its date, so one must already be in force at the first valuation
+
+
+def rates_start(start: str) -> str:
+    return (pd.Timestamp(start) - pd.Timedelta(days=RATES_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+
+
 def _requests(assets: list[Asset], fx_pair: str, rates_symbol: str, start: str, end: str) -> list[Request]:
     reqs = []
     for a in assets:
         for cap in ("metadata", "raw_prices", "total_return", "corporate_actions"):
             reqs.append(Request(cap, a.asset_id, start, end))
     reqs.append(Request("fx", fx_pair, start, end))
-    reqs.append(Request("rates", rates_symbol, start, end))
+    reqs.append(Request("rates", rates_symbol, rates_start(start), end))
     return reqs
 
 
@@ -450,8 +457,9 @@ def _validate(items_resp: list[tuple[Item, ProviderResponse | None]], assets: li
                 issue("availability", item, f"{int((av < ev).sum())} rows are available before their event time")
             else:
                 days = ev.dt.strftime("%Y-%m-%d")
-                if ((days < start) | (days > end)).any():
-                    issue("outside_requested_range", item, f"rows outside {start}..{end}")
+                lo = rates_start(start) if item.capability == "rates" else start
+                if ((days < lo) | (days > end)).any():
+                    issue("outside_requested_range", item, f"rows outside {lo}..{end}")
             if df.empty:
                 issue("no_data", item, "the provider returned no rows for the requested range")
         if item.capability in ("raw_prices", "total_return") and not df.empty and bool((pd.to_numeric(df["value"], errors="coerce") <= 0).any()):

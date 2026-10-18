@@ -108,3 +108,20 @@ def test_the_quality_report_passes_complete_data_and_names_the_dividend_gap_of_a
     a[a.instrument_id != "035420.KS"].to_parquet(broken / "corporate_actions.parquet", index=False)
     bad = snapshot_report(broken, records(), frozenset({"035420.KS"}))
     assert not bad["passed"] and any("035420.KS" in f and "dividends a year" in f for f in bad["failures"])
+
+
+def test_a_rate_is_already_in_force_at_the_first_valuation_of_the_collected_window(world):
+    """The first live run failed in every shard with ``no KRW rate available`` at the window start: ECOS rates were collected only from the window
+    start, and a rate is published a business day after its date. The ledger accrues cash from the initial holdings timestamp, so a rate must
+    already be available then (and fresh enough)."""
+    import pandas as pd
+
+    from quant_pipeline.calendars import Calendars
+    from quant_pipeline.rates import RateCurve
+
+    snap = world["root"] / "data" / "snapshots" / "research" / "current"
+    rates = pd.read_parquet(snap / "rates_krw_rfr.parquet")
+    assert rates["rate_date"].min() < START  # collected before the window start
+    first = pd.Timestamp(START, tz="UTC")  # the initial holdings are marked at the window start (00:00Z)
+    curve = RateCurve.from_frame(rates, 5)
+    assert float(curve.rate_in_force(first, Calendars.load(["XKRX", "XNYS"]))) > 0
