@@ -224,7 +224,7 @@ class YahooProvider(Provider):
     name = "yfinance"
     adapter_version = "1"
     license = ("Yahoo Finance data through the unofficial yfinance client: for personal, non-commercial research use under Yahoo's terms; "
-               "not redistributable; no service-level or accuracy guarantee (user-attested)")
+               "not redistributable; no service-level commitment and no accuracy warranty (user-attested)")
 
     def __init__(self, client: YahooClient, assets: dict[str, AssetBinding], cals: Calendars, *, price_delay: str, fx_delay: str):
         self.client, self.assets, self.cals, self.price_delay, self.fx_delay = client, assets, cals, price_delay, fx_delay
