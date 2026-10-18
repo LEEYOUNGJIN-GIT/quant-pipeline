@@ -38,8 +38,8 @@ def main() -> int:
               f"max absolute {n['max_abs']:.3e}; categorical differences in {len(n['categorical'])} file(s)")
         for k, r in n["worst_numeric"]:
             print(f"     numeric {r:.3e}  {k}")
-        for k, why in list(n["categorical"].items())[:10]:
-            print(f"     CATEGORICAL {k}: {why}")
+        for field, count in n["categorical_fields"]:
+            print(f"     CATEGORICAL x{count}  {field}")
         for k in n["other_files"]:
             print(f"     text {k}")
     print("artifacts:", "pass" if report["passed"] else "FAIL")

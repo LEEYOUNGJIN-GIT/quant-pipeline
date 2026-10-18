@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import math
+import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -120,10 +122,24 @@ def _walk(a: Any, b: Any, path: str, out: dict[str, Any]) -> None:
                 out["categorical"].append(f"{path}: length {len(a)} vs {len(b)}")
             for i, (u, v) in enumerate(zip(a, b, strict=False)):
                 _walk(u, v, f"{path}[{i}]", out)
+        elif isinstance(a, str) and isinstance(b, str) and a != b and _decimal_pair(a, b):
+            _number(float(a), float(b), out)  # amounts are stored as decimal strings: a number, not a label
         elif a != b:
             out["categorical"].append(f"{path}: {type(a).__name__} differs")
         return
-    x, y = float(a), float(b)
+    _number(float(a), float(b), out)
+
+
+def _decimal_pair(a: str, b: str) -> bool:
+    try:
+        float(a)
+        float(b)
+    except ValueError:
+        return False
+    return not (a.startswith(("sha256:", "0x")))
+
+
+def _number(x: float, y: float, out: dict[str, Any]) -> None:
     if x == y or (math.isnan(x) and math.isnan(y)):
         return
     diff = abs(x - y)
@@ -149,9 +165,14 @@ def compare_numeric(a: Path, b: Path) -> dict[str, Any]:
             rec["categorical"].append("not parseable as JSON")
         per_file[k] = rec
     categorical = {k: v["categorical"][:3] for k, v in per_file.items() if v["categorical"]}
+    fields: Counter[str] = Counter()
+    for k, v in per_file.items():
+        for c in v["categorical"]:
+            where, _, what = c.partition(": ")
+            fields[f"{k.rsplit('/', 1)[-1]} {re.sub(r'\[\d+\]', '[*]', where)} ({what})"] += 1
     numeric_only = {k: v for k, v in per_file.items() if not v["categorical"]}
     worst = sorted(((v["max_rel"], k) for k, v in numeric_only.items()), reverse=True)[:5]
     return {"n_differing_files": len(files), "n_json": len(per_file), "n_other": len(other), "other_files": other[:10],
-            "categorical": categorical, "max_abs": max([v["max_abs"] for v in per_file.values()], default=0.0),
+            "categorical": categorical, "categorical_fields": fields.most_common(25), "max_abs": max([v["max_abs"] for v in per_file.values()], default=0.0),
             "max_rel": max([v["max_rel"] for v in per_file.values()], default=0.0), "worst_numeric": [(k, r) for r, k in worst],
             "no_categorical_difference": not categorical, "same_files": set(x) == set(y)}
