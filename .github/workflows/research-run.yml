@@ -23,7 +23,15 @@ on:
         required: false
         default: ""
       compare_workflow_run_id:
-        description: "optional: id of an earlier research-run (same snapshot, same run id) whose finished run this one must equal byte for byte"
+        description: "optional: id of an earlier research-run (same snapshot, same run id) to compare this run with (numerically; other hardware may differ in the last bits, never categorically)"
+        required: false
+        default: ""
+      compare_only:
+        description: "true: compute nothing, only verify the finished run of source_workflow_run_id and compare it with compare_workflow_run_id"
+        required: false
+        default: "false"
+      source_workflow_run_id:
+        description: "with compare_only: id of the research-run whose finished run is verified"
         required: false
         default: ""
 
@@ -37,6 +45,7 @@ env:
 
 jobs:
   plan:
+    if: inputs.compare_only != 'true'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
@@ -49,6 +58,7 @@ jobs:
 
   shard:
     needs: plan
+    if: inputs.compare_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 355
     strategy:
@@ -162,7 +172,7 @@ jobs:
 
   verify:
     needs: finish
-    if: needs.finish.result == 'success'
+    if: always() && (needs.finish.result == 'success' || inputs.compare_only == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -180,7 +190,7 @@ jobs:
 
       - name: Get and decrypt the finished run
         run: |
-          gh run download "${{ github.run_id }}" -n "finished-${{ inputs.run_id }}" -D dl
+          gh run download "${{ inputs.compare_only == 'true' && inputs.source_workflow_run_id || github.run_id }}" -n "finished-${{ inputs.run_id }}" -D dl
           mkdir -p runs
           openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/finished.tar.gz.enc | tar -xzf - -C runs
 
@@ -190,10 +200,10 @@ jobs:
       - name: Aggregate summary (no prices, weights or per-date values)
         run: uv run python tools/run_summary.py "runs/${{ inputs.run_id }}"
 
-      - name: Compare with an earlier run, byte for byte
+      - name: Compare with an earlier run (numerically; categorical differences fail)
         if: inputs.compare_workflow_run_id != ''
         run: |
           gh run download "${{ inputs.compare_workflow_run_id }}" -n "finished-${{ inputs.run_id }}" -D dl2
           mkdir -p runs2
           openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl2/finished.tar.gz.enc | tar -xzf - -C runs2
-          uv run python tools/verify_artifacts.py "runs/${{ inputs.run_id }}" --compare "runs2/${{ inputs.run_id }}"
+          uv run python tools/verify_artifacts.py "runs/${{ inputs.run_id }}" --compare "runs2/${{ inputs.run_id }}" --compare-numeric
