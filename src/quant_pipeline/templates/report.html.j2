@@ -77,7 +77,8 @@
 {% if research %}
 <h2>10. Research data, monthly decisions and regime fits</h2>
 <p>Snapshot <code>{{ research.snapshot_id[:19] }}</code> from provider <code>{{ research.provider }}</code>, window {{ research.window }}, {{ research.assets|length }} assets: {{ research.assets|join(", ") }}.</p>
-<p>Data terms and assumptions: {{ research.license }}</p>
+{% if research.unobserved_sessions %}<p>Common sessions on which the provider had no observation for some asset ({{ research.unobserved_sessions|length }}), excluded from the complete-case rows and never filled: {{ research.unobserved_sessions|join(", ") }}.</p>
+{% endif %}<p>Data terms and assumptions: {{ research.license }}</p>
 <h3>10.1 Monthly decisions in the scored outer folds (strategy, 1x costs)</h3>
 <div class="scroll"><table>
 <tr><th>fold</th><th>decision</th><th>cutoff (UTC)</th><th>risky share</th><th>cash</th><th>orders</th><th>one-way turnover</th><th>branch</th><th>censored</th></tr>

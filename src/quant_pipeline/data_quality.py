@@ -49,10 +49,11 @@ def validate_data(cfg: Config, root: Path) -> list[Result]:
 
         cfg = hydrate_universe(cfg, snap)  # the records the rest of the checks (and later the engine) use are the verified, hashed ones
         from .calendars import build_row_map, window_from_manifest
-        from .snapshot import complete_case_coverage
+        from .snapshot import complete_case_coverage, research_unobserved
 
         try:
-            rm, sess = build_row_map(cfg, Calendars.load(list(cfg.calendars.required)), window_from_manifest(snap.manifest))
+            cals = Calendars.load(list(cfg.calendars.required))
+            rm, sess = build_row_map(cfg, cals, window_from_manifest(snap.manifest), unobserved=research_unobserved(cfg, snap, cals))
             out.append(_r("row_map", True, f"{len(rm.complete_case)} complete-case, {len(rm.eligible)} eligible rows, {len(rm.decisions)} monthly decisions"))
             out.extend(_r(n, ok, d) for n, ok, d in complete_case_coverage(cfg, snap, sess["XNYS"].intersection(sess["XKRX"])))
         except ValueError as e:  # too short a window, a ninth outer fold, ...: reported, never truncated

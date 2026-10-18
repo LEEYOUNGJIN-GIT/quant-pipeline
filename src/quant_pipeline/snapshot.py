@@ -91,19 +91,50 @@ def load_research_context(cfg: Config, root: Path) -> tuple[Config, ResolvedSnap
     return hydrate_universe(cfg, snap), snap
 
 
-def complete_case_coverage(cfg: Config, snap: ResolvedSnapshot, common_sessions: pd.DatetimeIndex) -> list[tuple[str, bool, str]]:
-    """Every risky asset needs an accepted total-return observation on every common XKRX/XNYS session (the first only seeds a level, the
-    rest are the complete-case return rows); nothing is dropped or filled silently."""
+MAX_UNOBSERVED_SHARE = 0.005  # of the common XKRX/XNYS sessions: more missing provider data than this is a data problem, not a gap
+MAX_UNOBSERVED_RUN = 3  # consecutive common sessions
+
+
+def unobserved_common_sessions(cfg: Config, snap: ResolvedSnapshot, common_sessions: pd.DatetimeIndex) -> frozenset[str]:
+    """Common XKRX/XNYS sessions on which at least one risky asset has no accepted total-return observation.
+
+    Spec 5.1 rules 5-7: such a row has a null return for that asset and is excluded from the complete-case rows; nothing is filled, backfilled
+    or spread over other rows, and the asset's next return runs from its preceding observed level. Derived from the verified snapshot only."""
     tr = pd.read_parquet(snap.files["prices_total_return"], columns=["instrument_id", "exchange_session"])
     have = tr.groupby("instrument_id").exchange_session.agg(set)
-    out: list[tuple[str, bool, str]] = []
     want = {s.strftime("%Y-%m-%d") for s in common_sessions}
-    missing = {a.asset_id: sorted(want - have.get(a.asset_id, set())) for a in (cfg.universe.assets or [])}
-    bad = {k: v for k, v in missing.items() if v}
-    out.append(("complete_case_coverage", not bad,
-                "every asset observes every complete-case session" if not bad else
-                "; ".join(f"{k}: {len(v)} sessions missing (first {v[0]})" for k, v in sorted(bad.items()))))
-    return out
+    out: set[str] = set()
+    for a in cfg.universe.assets or []:
+        out |= want - have.get(a.asset_id, set())
+    return frozenset(out)
+
+
+def research_unobserved(cfg: Config, snap: ResolvedSnapshot, cals) -> frozenset[str]:
+    """``unobserved_common_sessions`` over the snapshot's own collected window; what the research row map excludes."""
+    from .calendars import window_from_manifest
+
+    start, end = window_from_manifest(snap.manifest)
+    both = cals.sessions("XNYS", start, end).intersection(cals.sessions("XKRX", start, end))
+    return unobserved_common_sessions(cfg, snap, both)
+
+
+def complete_case_coverage(cfg: Config, snap: ResolvedSnapshot, common_sessions: pd.DatetimeIndex) -> list[tuple[str, bool, str]]:
+    """The common sessions without a full set of observations are excluded from the complete-case rows (listed, never filled); too many, or too
+    many in a row, is a data problem and fails."""
+    missing = sorted(unobserved_common_sessions(cfg, snap, common_sessions))
+    order = [s.strftime("%Y-%m-%d") for s in common_sessions]
+    flags = [d in set(missing) for d in order]
+    run = best = 0
+    for f in flags:
+        run = run + 1 if f else 0
+        best = max(best, run)
+    share = len(missing) / max(len(order), 1)
+    ok = share <= MAX_UNOBSERVED_SHARE and best <= MAX_UNOBSERVED_RUN
+    if not missing:
+        return [("complete_case_coverage", True, "every asset observes every common session")]
+    detail = (f"{len(missing)} of {len(order)} common sessions ({share:.4%}) lack an observation for some asset and are excluded from the complete-case rows "
+              f"(longest run {best}; limits {MAX_UNOBSERVED_SHARE:.2%} and {MAX_UNOBSERVED_RUN}): {' '.join(missing[:12])}")
+    return [("complete_case_coverage", ok, detail)]
 
 
 def scan_contamination(cfg: Config, root: Path, snap: ResolvedSnapshot) -> list[tuple[str, bool, str]]:

@@ -96,7 +96,9 @@ Holdout ({{ holdout.decisions }} decisions, {{ holdout.intervals }} valuation in
 
 Snapshot `{{ research.snapshot_id[:19] }}` from provider `{{ research.provider }}`, window {{ research.window }}, {{ research.assets|length }} assets: {{ research.assets|join(", ") }}.
 
-Data terms and assumptions: {{ research.license }}
+{% if research.unobserved_sessions %}Common sessions on which the provider had no observation for some asset ({{ research.unobserved_sessions|length }}), excluded from the complete-case rows and never filled: {{ research.unobserved_sessions|join(", ") }}.
+
+{% endif %}Data terms and assumptions: {{ research.license }}
 
 ### 10.1 Monthly decisions in the scored outer folds (strategy, 1x costs)
 

@@ -156,12 +156,13 @@ def window_from_manifest(manifest: dict) -> tuple[str, str]:
     return req["start"], req["end"]
 
 
-def build_row_map(cfg: Config, cals: Calendars, window: tuple[str, str] | None = None) -> tuple[RowMap, dict[str, pd.DatetimeIndex]]:
+def build_row_map(cfg: Config, cals: Calendars, window: tuple[str, str] | None = None,
+                  unobserved: frozenset[str] = frozenset()) -> tuple[RowMap, dict[str, pd.DatetimeIndex]]:
     fw = cfg.data.fixture_window
     if fw is None:
         if window is None:
             raise ValueError("a snapshot profile needs the collected window (the manifest's request start/end) to build its row map")
-        return _research_row_map(cfg, cals, *window)
+        return _research_row_map(cfg, cals, *window, unobserved=unobserved)
     start, end = fw.seed_observation_start_session, fw.decision_end_session
     sess = {n: cals.sessions(n, start, end) for n in ("XKRX", "XNYS")}
     both = sess["XNYS"].intersection(sess["XKRX"])
@@ -183,10 +184,12 @@ def build_row_map(cfg: Config, cals: Calendars, window: tuple[str, str] | None =
     return rm, sess
 
 
-def _research_row_map(cfg: Config, cals: Calendars, start: str, end: str) -> tuple[RowMap, dict[str, pd.DatetimeIndex]]:
+def _research_row_map(cfg: Config, cals: Calendars, start: str, end: str,
+                      unobserved: frozenset[str] = frozenset()) -> tuple[RowMap, dict[str, pd.DatetimeIndex]]:
     sess = {n: cals.sessions(n, start, end) for n in ("XKRX", "XNYS")}
     both = sess["XNYS"].intersection(sess["XKRX"])
-    complete_case = tuple(both[1:])
+    # a common session on which some asset has no observation is not a complete-case row (spec 5.1 rule 6); empty for gap-free data
+    complete_case = tuple(x for x in both[1:] if x.strftime("%Y-%m-%d") not in unobserved)
     warm = research_warmup_rows(cfg)
     eligible = complete_case[warm:]
     if not eligible:
