@@ -108,6 +108,12 @@ def compare_runs(a: Path, b: Path, ignore_suffixes: tuple[str, ...] = ()) -> dic
             "identical": not only_a and not only_b and not different}
 
 
+# Content hashes computed from fields this comparison already examines one by one (plan_hash = hash of the plan body; replay_hash = hash of the plan hashes).
+# They differ exactly when some underlying number differs, so they are reported apart and are not a second, independent difference.
+DERIVED_HASH_FIELDS = frozenset({"plan_hash", "replay_hash"})
+MAX_ABS_DIFFERENCE = 1e-6  # the implementer's bound on numeric differences between runs on other hardware (observed: 8e-10)
+
+
 def _walk(a: Any, b: Any, path: str, out: dict[str, Any]) -> None:
     """Compare two JSON values leaf by leaf: numbers by absolute and relative difference, everything else (keys, strings, booleans, shapes) exactly."""
     numeric = (isinstance(a, (int, float)) and not isinstance(a, bool)) and (isinstance(b, (int, float)) and not isinstance(b, bool))
@@ -125,7 +131,10 @@ def _walk(a: Any, b: Any, path: str, out: dict[str, Any]) -> None:
         elif isinstance(a, str) and isinstance(b, str) and a != b and _decimal_pair(a, b):
             _number(float(a), float(b), out)  # amounts are stored as decimal strings: a number, not a label
         elif a != b:
-            out["categorical"].append(f"{path}: {type(a).__name__} differs")
+            if path.rsplit("/", 1)[-1] in DERIVED_HASH_FIELDS:
+                out["derived"].append(path)
+            else:
+                out["categorical"].append(f"{path}: {type(a).__name__} differs")
         return
     _number(float(a), float(b), out)
 
@@ -158,13 +167,17 @@ def compare_numeric(a: Path, b: Path) -> dict[str, Any]:
         if not k.endswith(".json"):
             other.append(k)
             continue
-        rec: dict[str, Any] = {"categorical": [], "max_abs": 0.0, "max_rel": 0.0, "n_numeric": 0}
+        rec: dict[str, Any] = {"categorical": [], "derived": [], "max_abs": 0.0, "max_rel": 0.0, "n_numeric": 0}
         try:
             _walk(json.loads(x[k]), json.loads(y[k]), "", rec)
         except ValueError:
             rec["categorical"].append("not parseable as JSON")
         per_file[k] = rec
     categorical = {k: v["categorical"][:3] for k, v in per_file.items() if v["categorical"]}
+    derived: Counter[str] = Counter()
+    for k, v in per_file.items():
+        for path in v["derived"]:
+            derived[f"{k.rsplit('/', 1)[-1]} {re.sub(r'\[\d+\]', '[*]', path)}"] += 1
     fields: Counter[str] = Counter()
     for k, v in per_file.items():
         for c in v["categorical"]:
@@ -173,6 +186,7 @@ def compare_numeric(a: Path, b: Path) -> dict[str, Any]:
     numeric_only = {k: v for k, v in per_file.items() if not v["categorical"]}
     worst = sorted(((v["max_rel"], k) for k, v in numeric_only.items()), reverse=True)[:5]
     return {"n_differing_files": len(files), "n_json": len(per_file), "n_other": len(other), "other_files": other[:10],
-            "categorical": categorical, "categorical_fields": fields.most_common(25), "max_abs": max([v["max_abs"] for v in per_file.values()], default=0.0),
+            "categorical": categorical, "categorical_fields": fields.most_common(25), "derived_hash_differences": derived.most_common(), "max_abs": max([v["max_abs"] for v in per_file.values()], default=0.0),
             "max_rel": max([v["max_rel"] for v in per_file.values()], default=0.0), "worst_numeric": [(k, r) for r, k in worst],
-            "no_categorical_difference": not categorical, "same_files": set(x) == set(y)}
+            "no_categorical_difference": not categorical, "within_numeric_bound": max([v["max_abs"] for v in per_file.values()], default=0.0) <= MAX_ABS_DIFFERENCE,
+            "same_files": set(x) == set(y)}

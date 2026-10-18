@@ -64,6 +64,17 @@ def test_amounts_stored_as_decimal_strings_are_numbers_and_hashes_stay_labels(tm
     assert r["no_categorical_difference"] and 0 < r["max_rel"] < 1e-8  # a decimal string differing in the tenth place is noise, not a label
     c = {"plans.json": [{"orders": [{"target_absolute_weight": "0.1250000000", "plan_hash": "sha256:bb"}]}]}
     r = compare_numeric(run(tmp_path / "c", a), run(tmp_path / "d", c))
-    assert not r["no_categorical_difference"]  # a different hash is a label difference: the caller sees which field it is
-    assert r["categorical_fields"][0][0].startswith("plans.json [*]/orders[*]/plan_hash") or "plan_hash" in r["categorical_fields"][0][0]
-    assert "[0]" not in r["categorical_fields"][0][0]  # indices are folded so the same field is counted once
+    assert r["no_categorical_difference"] and r["derived_hash_differences"]  # plan_hash is a content hash of fields compared one by one: reported apart
+    assert "plan_hash" in r["derived_hash_differences"][0][0] and "[0]" not in r["derived_hash_differences"][0][0]  # indices folded
+    e = {"plans.json": [{"orders": [{"target_absolute_weight": "0.1250000000", "plan_hash": "sha256:aa", "ticker": "SPY"}]}]}
+    f = {"plans.json": [{"orders": [{"target_absolute_weight": "0.1250000000", "plan_hash": "sha256:aa", "ticker": "TLT"}]}]}
+    r = compare_numeric(run(tmp_path / "e", e), run(tmp_path / "f", f))
+    assert not r["no_categorical_difference"] and r["categorical_fields"][0][0].endswith("ticker (str differs)")  # a different order is not hidden
+
+
+def test_the_numeric_bound_is_part_of_the_verdict(tmp_path):
+    big = {"stats.json": {"sharpe": 1.356 + 1e-3}}
+    r = compare_numeric(run(tmp_path / "a", {"stats.json": {"sharpe": 1.356}}), run(tmp_path / "b", big))
+    assert r["no_categorical_difference"] and not r["within_numeric_bound"]
+    tiny = {"stats.json": {"sharpe": 1.356 + 1e-10}}
+    assert compare_numeric(run(tmp_path / "c", {"stats.json": {"sharpe": 1.356}}), run(tmp_path / "d", tiny))["within_numeric_bound"]

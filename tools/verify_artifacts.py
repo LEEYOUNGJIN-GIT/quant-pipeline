@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from quant_pipeline.artifact_check import check_run, compare_numeric, compare_runs
+from quant_pipeline.artifact_check import MAX_ABS_DIFFERENCE, check_run, compare_numeric, compare_runs
 
 
 def main() -> int:
@@ -25,7 +25,7 @@ def main() -> int:
         if args.compare_numeric:
             num = compare_numeric(args.run, args.compare)
             report["numeric_comparison"] = num
-            report["passed"] = report["passed"] and cmp["same_files"] and num["no_categorical_difference"]
+            report["passed"] = report["passed"] and cmp["same_files"] and num["no_categorical_difference"] and num["within_numeric_bound"]
         else:
             report["passed"] = report["passed"] and cmp["identical"]
     for c in report["checks"]:
@@ -40,6 +40,9 @@ def main() -> int:
             print(f"     numeric {r:.3e}  {k}")
         for field, count in n["categorical_fields"]:
             print(f"     CATEGORICAL x{count}  {field}")
+        for field, count in n["derived_hash_differences"]:
+            print(f"     derived hash x{count}  {field}")
+        print(f"     numeric bound {MAX_ABS_DIFFERENCE:.0e} absolute: {'within' if n['within_numeric_bound'] else 'EXCEEDED'}")
         for k in n["other_files"]:
             print(f"     text {k}")
     print("artifacts:", "pass" if report["passed"] else "FAIL")
