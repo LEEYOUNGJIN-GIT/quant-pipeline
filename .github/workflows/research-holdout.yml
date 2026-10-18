@@ -1,0 +1,88 @@
+# Open the sealed final holdout of a finished research run, ONCE. Deliberately separate from research-run: it is irreversible and must be a human decision.
+# Needs the exact acknowledgement text below, the secret SNAPSHOT_PASSPHRASE, the research-data run (snapshot) and the finished research-run.
+# One opening per lineage is enforced by the checkpoint store inside the run's artifact; because a workflow starts from an artifact copy, this job also
+# refuses when an "opened-<run_id>" artifact already exists in the repository.
+name: research-holdout
+
+on:
+  workflow_dispatch:
+    inputs:
+      data_run_id:
+        description: "run id of the research-data workflow (snapshot)"
+        required: true
+      finished_run_id:
+        description: "run id of the finished research-run workflow"
+        required: true
+      run_id:
+        description: "research run id (as used in research-run)"
+        required: false
+        default: "real1"
+      acknowledgement:
+        description: "type exactly: I_UNDERSTAND_THIS_OPENS_THE_FINAL_HOLDOUT"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: research-holdout
+  cancel-in-progress: false
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+      QUANT_FINAL_HOLDOUT_ACK: ${{ inputs.acknowledgement }}
+    steps:
+      - name: Refuse unless the acknowledgement is exact and no opening exists yet
+        run: |
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+          [ "$QUANT_FINAL_HOLDOUT_ACK" = "I_UNDERSTAND_THIS_OPENS_THE_FINAL_HOLDOUT" ] || { echo "::error::the acknowledgement text is not exact; nothing was opened"; exit 1; }
+          N=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=opened-${{ inputs.run_id }}" --jq '[.artifacts[] | select(.expired == false)] | length')
+          [ "$N" = "0" ] || { echo "::error::an opened-${{ inputs.run_id }} artifact already exists: the holdout was opened once and cannot be opened again"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+
+      - name: Get and decrypt the snapshot and the finished run
+        run: |
+          gh run download "${{ inputs.data_run_id }}" -n research-snapshot -D dl
+          mkdir -p data/snapshots/research outputs/runs
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/snapshot.tar.gz.enc | tar -xzf - -C data/snapshots/research
+          ID=$(ls data/snapshots/research | grep -E '^[0-9a-f]{64}$' | head -1)
+          ln -sfn "$ID" data/snapshots/research/current
+          gh run download "${{ inputs.finished_run_id }}" -n "finished-${{ inputs.run_id }}" -D fin
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in fin/finished.tar.gz.enc | tar -xzf - -C outputs/runs
+
+      - name: Open the holdout (flag + acknowledgement + valid pre-holdout state required)
+        run: uv run quant-pipeline holdout open --config configs/research_8_12asset.yaml --run-id "${{ inputs.run_id }}" --unlock-final-holdout
+
+      - name: "Encrypt the opened run (only when an audit record exists, so a refused opening cannot block a later valid one)"
+        id: enc
+        if: always()
+        run: |
+          if ! find "outputs/runs/${{ inputs.run_id }}" -name holdout_audit.json 2>/dev/null | grep -q .; then echo "no audit record: nothing was opened"; exit 0; fi
+          echo "opened=true" >> "$GITHUB_OUTPUT"
+          tar -C outputs/runs -czf - "${{ inputs.run_id }}" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out opened.tar.gz.enc
+
+      - name: Upload the opened run
+        if: always() && steps.enc.outputs.opened == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: opened-${{ inputs.run_id }}
+          path: opened.tar.gz.enc
+          retention-days: 90
+          if-no-files-found: error

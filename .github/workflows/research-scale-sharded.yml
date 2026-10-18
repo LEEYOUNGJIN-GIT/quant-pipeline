@@ -1,0 +1,123 @@
+# End-to-end rehearsal of the sharded research run at the real profile's size on SYNTHETIC data (no secrets, no provider data): one job builds the synthetic
+# snapshot and every other job downloads it (separate builds can differ in the last bit between runner CPUs), each shard computes its trial paths, the finishing job merges the checkpoints and completes the run up to the pre-holdout report.
+# It measures what the real run will cost on GitHub-hosted runners and proves the shard/merge/finish chain there. Engineering evidence only.
+name: research-scale-sharded
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/research-scale-sharded.yml"]  # a rehearsal runs when this file changes, because workflow_dispatch needs the default branch
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "number of parallel runners for the trial paths"
+        required: false
+        default: "16"
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        run: python3 -c "import json,sys; print('matrix=' + json.dumps(list(range(int(sys.argv[1])))))" "${{ inputs.shards || '16' }}" >> "$GITHUB_OUTPUT"
+
+  data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Build the synthetic snapshot once
+        run: |
+          mkdir -p "$RUNNER_TEMP/w"
+          uv run python tools/scale_probe.py --work "$RUNNER_TEMP/w" --build-only
+          tar -C "$RUNNER_TEMP/w" -czf repo.tar.gz repo
+          echo "manifest sha256: $(sha256sum "$RUNNER_TEMP"/w/repo/r/data/snapshots/research/*/manifest.json | cut -c1-16)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: synthetic-repo
+          path: repo.tar.gz
+          retention-days: 3
+
+  shard:
+    needs: [plan, data]
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Fetch the snapshot and compute this shard
+        run: |
+          mkdir -p "$RUNNER_TEMP/w"
+          gh run download "${{ github.run_id }}" -n synthetic-repo -D dl
+          tar -xzf dl/repo.tar.gz -C "$RUNNER_TEMP/w"
+          ROOT="$RUNNER_TEMP/w/repo/r"
+          echo "REPO=$ROOT" >> "$GITHUB_ENV"
+          START=$(date +%s)
+          uv run python -m quant_pipeline.research_pipeline --root "$ROOT" --run-id scale --out-root "$RUNNER_TEMP/out" \
+            --config configs/research_8_12asset.yaml --allow-synthetic --trial-shard "${{ matrix.shard }}/${{ inputs.shards || '16' }}"
+          echo "shard ${{ matrix.shard }} seconds: $(( $(date +%s) - START ))"
+      - name: Pack this shard
+        run: tar -C "$RUNNER_TEMP/out/scale" -czf shard.tar.gz checkpoints
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: shard-${{ matrix.shard }}
+          path: shard.tar.gz
+          retention-days: 3
+
+  finish:
+    needs: [data, shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Merge the shards
+        run: |
+          mkdir -p "$RUNNER_TEMP/w" "$RUNNER_TEMP/out/scale"
+          gh run download "${{ github.run_id }}" -n synthetic-repo -D dl
+          tar -xzf dl/repo.tar.gz -C "$RUNNER_TEMP/w"
+          echo "REPO=$RUNNER_TEMP/w/repo/r" >> "$GITHUB_ENV"
+          gh run download "${{ github.run_id }}" -p 'shard-*' -D shards
+          for f in shards/*/shard.tar.gz; do tar -xzf "$f" -C "$RUNNER_TEMP/out/scale"; done
+          ls "$RUNNER_TEMP/out/scale/checkpoints" | head
+      - name: Finish the run
+        run: |
+          START=$(date +%s)
+          uv run python -m quant_pipeline.research_pipeline --root "$REPO" --run-id scale --out-root "$RUNNER_TEMP/out" \
+            --config configs/research_8_12asset.yaml --allow-synthetic --projection-out projection.json
+          echo "finish seconds: $(( $(date +%s) - START ))"
+          python3 -c "import json;d=json.load(open('projection.json'));print({k:d[k] for k in ('winners','evidence_class') if k in d})"

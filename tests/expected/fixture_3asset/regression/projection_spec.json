@@ -1,0 +1,12 @@
+{
+ "excluded_fields": [],
+ "label": "reviewed_regression",
+ "lineage_policy": "compared with the hashes freshly computed for the verified tree",
+ "note": "production-dependent snapshot; never an independent oracle; every field is compared exactly except the two declared numeric tolerances below",
+ "schema": "comparison-projection-1",
+ "tolerances": {
+  "plan_hashes": "count_only",
+  "rationale": "the same code and lock gave different registry scores (max abs 1.7e-2, no eligibility flips) and therefore different plan hashes on different GitHub-hosted runners; fills, NAV, ledger hashes, costs, benchmarks, winners and eligibility are identical across all observed variants and stay exact",
+  "registry_score_abs": 0.05
+ }
+}

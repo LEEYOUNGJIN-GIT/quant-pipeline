@@ -1,0 +1,47 @@
+{
+  "calendar_session_digest": "sha256:6bd92ae58d06e7e863e46e66d1c7a6007a5737b4784292907eabe2cb1865f442",
+  "files": {
+    "corporate_actions.parquet": {
+      "logical_sha256": "sha256:60d2233f3c0bf33674648f7ffe88bf936cae4f399026cc31cce3cd888f62da2d",
+      "raw_sha256": "sha256:33fef7d6fca57eabad96f79b3597389ccb20ad907b52a2c151547c7e8fb342f1",
+      "rows": 2
+    },
+    "fixed_regime_table.csv": {
+      "logical_sha256": "sha256:0b55fc64cd0e59aae8f6fd2c5a6f6e124c524a3b051444b69b5ca28f847a51bf",
+      "raw_sha256": "sha256:0b55fc64cd0e59aae8f6fd2c5a6f6e124c524a3b051444b69b5ca28f847a51bf",
+      "rows": 97
+    },
+    "fx_krw_per_usd.parquet": {
+      "logical_sha256": "sha256:9fb4e383957b2e0c7ce134c29ac842b6373dcbafb2adbe8150a90649b433046e",
+      "raw_sha256": "sha256:ea84ba3891b1630ccf8943b3c0ce0a784a0f73caf96be247687e33c844c1298b",
+      "rows": 193
+    },
+    "initial_holdings.csv": {
+      "logical_sha256": "sha256:b5453400b8e01244e6ee29252a4d4bb77c4d86a233f4bebdb35d639c65cbdb25",
+      "raw_sha256": "sha256:b5453400b8e01244e6ee29252a4d4bb77c4d86a233f4bebdb35d639c65cbdb25",
+      "rows": 4
+    },
+    "prices_raw.parquet": {
+      "logical_sha256": "sha256:72a58b622904352ce0d6c0738a1c6ff58d8e9e398f33e7977e0c2a4a7e00d3b9",
+      "raw_sha256": "sha256:8c3e28b6bc2561c3dfc1d247b255c3b6401b65b6c44e4d56ef8e536990f800d5",
+      "rows": 287
+    },
+    "prices_total_return.parquet": {
+      "logical_sha256": "sha256:a53ccb9306802973087687daeb13ef377418748a0c4f1fd5ce1f4d9e5389f1b9",
+      "raw_sha256": "sha256:e8c75cfbd683cf0a49216f9f21f87b7b666e378a3549004e00181c3732b73038",
+      "rows": 287
+    },
+    "rates_krw_rfr.parquet": {
+      "logical_sha256": "sha256:3346a110bfe08a2cc6f67aa7adb8ad33686efee0f48797f02cf4f65c3f489c13",
+      "raw_sha256": "sha256:d56cc4ff962caba7fb779afe85fa59fd6869f086d722f5a79602ca360fb52ca3",
+      "rows": 94
+    }
+  },
+  "generation_lock_hash": "sha256:855e22f0a77a95a8a64a714891d09f76a49948dd27fb4b577a13875e555f6cc8",
+  "generator_source_hash": "sha256:256dcf30f214e141cb79ffb8989a504d87b133aaa310914b112d441b023ef68b",
+  "manifest_version": 1,
+  "scenario_definition_hash": "sha256:59f7cf286071af1ef90d67060132af57a3266736fd9766d8f1ff402b97b1523d",
+  "scenario_id": "fixture-v5",
+  "seed_stream": "fixture_data",
+  "seed_value": 1728
+}

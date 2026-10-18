@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root { --fg:#1b1f24; --bg:#ffffff; --muted:#59636e; --line:#d0d7de; --warn:#9a6700; --panel:#f6f8fa; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --bg:#0d1117; --muted:#9198a1; --line:#30363d; --warn:#d29922; --panel:#161b22; } }
+  body { font:15px/1.5 system-ui, sans-serif; color:var(--fg); background:var(--bg); max-width:980px; margin:0 auto; padding:16px; }
+  table { border-collapse:collapse; width:100%; margin:8px 0 16px; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:4px 8px; text-align:left; }
+  th { background:var(--panel); }
+  .banner { border:1px solid var(--warn); padding:8px 12px; background:var(--panel); }
+  code { background:var(--panel); padding:0 4px; }
+  .muted { color:var(--muted); }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<h1>{{ title }}</h1>
+<p class="banner"><strong>Status: {{ status_banner }}</strong><br>{{ data_note }}</p>
+<p class="muted">Specification <code>{{ spec_version }}</code> · profile <code>{{ profile }}</code> · run <code>{{ run_id }}</code> · lock <code>{{ lineage.lock_hash }}</code> · final holdout: <strong>{{ holdout.status }}</strong></p>
+
+<h2>1. Costs and tax</h2>
+<p class="banner"><strong>Tax is a zero placeholder.</strong> It is not an assertion that any market, account, investor or instrument is tax-exempt; net results are not production-realistic. Headline = 1x costs; 0x and 2x are labelled sensitivity replays.</p>
+
+<h2>2. Method</h2>
+<p>{{ method.outer_description }}. OOS valuation intervals: <strong>{{ method.oos_intervals }}</strong>. {{ method.inner_description }}. Schedule: {{ method.schedule }}.</p>
+
+<h2>3. Trials and stability</h2>
+<p>{{ budget.evaluations }} trial-fold evaluations; {{ budget.executed_paths }} executed paths versus a no-sharing bound of {{ budget.no_sharing_decisions }} decisions.</p>
+<div class="scroll"><table>
+<tr><th>pass</th><th>train end</th><th>winner</th><th>margin</th><th>tie path</th><th>LOO agrees</th><th>eligible</th></tr>
+{% for s in selection %}<tr><td>{{ s.name }}</td><td>{{ s.train_end }}</td><td><code>{{ s.winner }}</code></td><td>{{ "%.3f"|format(s.margin) }}</td><td>{{ s.tie_path }}</td><td>{{ s.loo_agrees }}</td><td>{{ s.eligible }}/{{ s.total }}</td></tr>
+{% endfor %}</table></div>
+{% for s in selection %}{% if s.unstable %}<p>selection_unstable for pass <strong>{{ s.name }}</strong> (disclosed; rule unchanged).</p>{% endif %}{% endfor %}
+
+<h2>4. Out-of-sample results (1x)</h2>
+<h3>Strategy and implementation-matched benchmarks</h3>
+<div class="scroll"><table>
+<tr><th>series</th><th>label</th><th>total return</th><th>Sharpe</th><th>max drawdown</th><th>costs (KRW)</th></tr>
+{% for r in panel_matched %}<tr><td>{{ r.name }}</td><td>{{ r.label }}</td><td>{{ "%.4f"|format(r.total_return) }}</td><td>{{ r.sharpe }}</td><td>{{ "%.4f"|format(r.max_drawdown) }}</td><td>{{ r.costs }}</td></tr>
+{% endfor %}</table></div>
+<h3>Conventional buy-and-hold reference — initial turnover exempt (separate panel)</h3>
+<div class="scroll"><table>
+<tr><th>series</th><th>label</th><th>total return</th><th>Sharpe</th><th>max drawdown</th><th>costs (KRW)</th></tr>
+{% for r in panel_reference %}<tr><td>{{ r.name }}</td><td>{{ r.label }}</td><td>{{ "%.4f"|format(r.total_return) }}</td><td>{{ r.sharpe }}</td><td>{{ "%.4f"|format(r.max_drawdown) }}</td><td>{{ r.costs }}</td></tr>
+{% endfor %}</table></div>
+<p>Reference-only; never pooled or ranked with the matched panel. Initial turnover {{ reference_initial_turnover }}.</p>
+<p>{{ cash.name }} (financing context): total return {{ "%.4f"|format(cash.total_return) }}.</p>
+
+<h2>5. Cost sensitivity</h2>
+<div class="scroll"><table>
+<tr><th>scenario</th><th>total return</th><th>Sharpe</th><th>costs (KRW)</th><th>intervals</th></tr>
+{% for r in sensitivity %}<tr><td>{{ r.name }}</td><td>{{ "%.4f"|format(r.total_return) }}</td><td>{{ r.sharpe }}</td><td>{{ r.costs }}</td><td>{{ r.intervals }}</td></tr>
+{% endfor %}</table></div>
+
+<h2>6. Uncertainty</h2>
+<p>{{ uncertainty.method }}, block length {{ uncertainty.block_length }}, {{ uncertainty.replicates }} replicates, index matrix {{ uncertainty.shape }}. <strong>{{ uncertainty.inference_label }}</strong> — deterministic smoke only; the holdout is excluded.</p>
+<div class="scroll"><table>
+<tr><th>series</th><th>point Sharpe</th><th>low</th><th>high</th></tr>
+{% for r in uncertainty.rows %}<tr><td>{{ r.name }}</td><td>{{ r.point }}</td><td>{{ r.low }}</td><td>{{ r.high }}</td></tr>
+{% endfor %}</table></div>
+
+<p><strong>{{ trial_warning }}</strong></p>
+<h2>7. Holdout status</h2>
+<p>{{ holdout.statement }}</p>
+{% if holdout.opened %}<div class="scroll"><table>
+<tr><th>series</th><th>label</th><th>total return</th><th>Sharpe</th><th>max drawdown</th></tr>
+{% for r in holdout.rows %}<tr><td>{{ r.name }}</td><td>{{ r.label }}</td><td>{{ "%.4f"|format(r.total_return) }}</td><td>{{ r.sharpe }}</td><td>{{ "%.4f"|format(r.max_drawdown) }}</td></tr>
+{% endfor %}</table></div>{% endif %}
+
+<h2>8. Degraded conditions and limitations</h2>
+<ul>{% for d in degraded %}<li>{{ d }}</li>{% endfor %}</ul>
+<p class="muted">The daily XNYS-anchored panel is an operational synchronization approximation; {{ limitation_regime }} {{ limitation_data }}</p>
+{% if research %}
+<h2>10. Research data, monthly decisions and regime fits</h2>
+<p>Snapshot <code>{{ research.snapshot_id[:19] }}</code> from provider <code>{{ research.provider }}</code>, window {{ research.window }}, {{ research.assets|length }} assets: {{ research.assets|join(", ") }}.</p>
+<p>Data terms and assumptions: {{ research.license }}</p>
+<h3>10.1 Monthly decisions in the scored outer folds (strategy, 1x costs)</h3>
+<div class="scroll"><table>
+<tr><th>fold</th><th>decision</th><th>cutoff (UTC)</th><th>risky share</th><th>cash</th><th>orders</th><th>one-way turnover</th><th>branch</th><th>censored</th></tr>
+{% for d in research.decisions %}<tr><td>{{ d.fold }}</td><td>{{ d.decision }}</td><td>{{ d.cutoff }}</td><td>{{ "%.4f"|format(d.risky) }}</td><td>{{ "%.4f"|format(d.cash) }}</td><td>{{ d.orders }}</td><td>{{ "%.4f"|format(d.turnover) }}</td><td>{{ d.branch }}</td><td>{{ d.censored }}</td></tr>
+{% endfor %}</table></div>
+<h3>10.2 Hidden-Markov regime fits</h3>
+<p>{{ research.hmm.n_fits }} fits across {{ research.hmm.refits }} refit positions; every fit converged: <strong>{{ research.hmm.all_converged }}</strong>. Only the forward-filtered state is used (no smoothing).</p>
+{% endif %}
+</body>
+</html>
