@@ -30,7 +30,7 @@ from quant_pipeline.research_pipeline import ResearchPipeline
 from quant_pipeline.splits import OuterFold, _block
 
 # ---- pre-registered (implementer's choice, to be confirmed by the user; see open-questions.md) -----------------------------------------------
-FORWARD_START = "2025-01-02"  # first model row on or after this date; the data window of the frozen selection ended 2024-12-31
+FORWARD_START = "2025-04-23"  # first model row on or after this date; amended from 2025-01-02 before any result existed (OQ-056): the FX series has a gap on 2025-04-18/21
 PRIMARY_BENCHMARK = "equal_weight_periodic"
 VERDICTS = {
     "supports": "the 95% interval of (strategy - benchmark) net excess Sharpe lies above zero",

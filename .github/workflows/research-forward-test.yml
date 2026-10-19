@@ -23,7 +23,7 @@ on:
       start:
         description: "first date of the forward interval (pre-registered default; change only with a written reason)"
         required: false
-        default: "2025-01-02"
+        default: "2025-04-23"
 
 permissions:
   contents: read
