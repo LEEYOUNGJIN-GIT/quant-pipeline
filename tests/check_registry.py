@@ -50,7 +50,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
                                                                          I + "test_phase5_engine.py::test_full_path_is_self_financing"], "gaps": []},
     "INV-FIX-001": {"tier": "V1", "scope": "fixture_path", "tests": [BB + "test_fixture_fresh_context.py::test_the_denial_hook", U + "test_coverage.py", I + "test_phase6_holdout.py::test_the_coverage_matrix", U + "test_fixture_data.py"],
                     "gaps": []},
-    "INV-FETCH-001": {"tier": "V1", "scope": "static", "tests": [U + "test_cli.py::test_static_doctor", U + "test_collector.py", U + "test_live_adapters.py", U + "test_fred_crosscheck.py", I + "test_live_roundtrip.py"], "gaps": []},
+    "INV-FETCH-001": {"tier": "V1", "scope": "static", "tests": [U + "test_cli.py::test_static_doctor", U + "test_collector.py", U + "test_live_adapters.py", U + "test_fred_crosscheck.py", U + "test_fx_report.py", I + "test_live_roundtrip.py"], "gaps": []},
     "INV-VAL-001": {"tier": "V1", "scope": "fixture_path", "tests": [I + "test_phase1_vs_oracle.py::test_valuation", I + "test_phase1_vs_oracle.py::test_stale", I + "test_phase1_vs_oracle.py::test_research_stale",
                                                                     U + "test_splits.py"], "gaps": []},
     # ---- V2 ------------------------------------------------------------------------------------------------------
