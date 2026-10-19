@@ -100,9 +100,12 @@ def forward_run(p: ForwardPipeline, selection: Frozen, start_date: str = FORWARD
     run, block, start, end = forward_paths(p, selection, start_date)
     series = {"strategy": (run.result.nav, run.result.costs)} | {b: (r.nav, r.costs) for b, r in run.benchmarks.items()}
     rets = {k: interval_returns(nav) for k, (nav, _) in series.items()}
-    sessions = list(rets["strategy"])
+    # The engine's NAV starts at the opening timestamp, so it also holds valuations before the forward start; the block owns only its own anchors.
+    sessions = [s for s in block.valuation_sessions if s in rets["strategy"]]
+    if not sessions:
+        raise ValueError("the forward block owns no valuation interval")
     for k, r in rets.items():
-        if list(r) != sessions:
+        if any(s not in r for s in sessions):
             raise ValueError(f"{k}: its valuation intervals differ from the strategy's")
     rf_all = p.ev.risk_free()
     rf = np.array([rf_all[s] for s in sessions])

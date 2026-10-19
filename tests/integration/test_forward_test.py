@@ -58,6 +58,16 @@ def test_the_strategy_and_the_benchmarks_cover_the_same_intervals_from_the_openi
     assert all(list(b.nav) == list(nav) for b in base["run"].benchmarks.values())
 
 
+def test_only_the_forward_block_is_scored_not_the_valuations_before_its_start(base):
+    out = F.forward_run(base["p"], frozen(base["p"], 0), START)
+    nav = base["run"].result.nav
+    owned = [s for s in base["block"].valuation_sessions if s in nav]
+    assert out["intervals"] == len(owned) < len(nav) - 1, "the NAV holds pre-start valuations that must not be scored"
+    assert min(owned) >= START
+    for k, m in out["metrics"].items():
+        assert m["intervals"] == len(owned) and -1.0 < m["total_return"] < 10.0, k
+
+
 def test_the_summary_is_complete_and_passes_the_wording_rules(base):
     out = F.forward_run(base["p"], frozen(base["p"], 0), START)
     assert out["verdict"] in ("supports", "no_evidence", "against") and out["evidence_class"] == "synthetic_engineering_test"
