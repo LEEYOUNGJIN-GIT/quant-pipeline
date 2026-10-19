@@ -63,7 +63,15 @@ def test_fred_missing_marker_is_skipped_not_zero():
 
 def test_the_report_holds_no_series_values():
     r = F.fx_crosscheck(snapshot_fx(BASE), FakeFred(BASE))
-    assert all(not isinstance(v, list) or k in {"range", "worst_dates", "failures"} for k, v in r.items())
+    assert all(not isinstance(v, list) or k in {"range", "worst_dates", "failures", "unmatched_first"} for k, v in r.items())
+
+
+def test_unmatched_dates_are_located_by_year_and_weekday():
+    fx = snapshot_fx(BASE)
+    fx = fx[~fx.event_timestamp_utc.str.startswith("2021-03-0")].reset_index(drop=True)  # drops the bars of 2021-03-01..09 minus one day
+    r = F.fx_crosscheck(fx, FakeFred(BASE))
+    assert r["unmatched_by_year"] == {"2021": sum(r["unmatched_by_weekday"].values())} and r["unmatched_first"][0].startswith("2021-03-0")
+    assert r["snapshot_bars"] == len(fx) and r["snapshot_only_bars"] == 0
 
 
 def test_a_malformed_response_is_schema_drift():
@@ -95,3 +103,15 @@ def test_missing_key_refuses_and_http_errors_do_not_echo_the_key(monkeypatch):
     with pytest.raises(TransientError) as e2:
         F.RealFredClient("SECRETKEY123").observations("DEXKOUS", "2021-01-01", "2021-12-31")
     assert "SECRETKEY123" not in str(e2.value)
+
+
+def test_summer_time_stamps_map_back_to_their_own_bar_date():
+    """Yahoo's stamp is London midnight after the bar: 23:00Z of the bar's own date in summer, 00:00Z of the next date in winter (the bug this guards)."""
+    from quant_pipeline.yfinance_adapter import FX_BAR_TIMEZONE
+
+    dates = pd.bdate_range("2021-03-22", "2021-04-09")  # across the last Sunday of March
+    ev = [(pd.Timestamp(d.strftime("%Y-%m-%d"), tz=FX_BAR_TIMEZONE).tz_convert("UTC") + pd.Timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ") for d in dates]
+    fx = pd.DataFrame({"pair_id": "USDKRW", "event_timestamp_utc": ev, "available_at_utc": ev, "value": np.arange(len(dates), dtype=float) + 1100.0,
+                       "quote_convention": "KRW_per_USD", "source_id": "x"})
+    assert list(F.snapshot_bar_dates(fx).index) == [d.strftime("%Y-%m-%d") for d in dates]
+    assert any(e.endswith("T23:00:00Z") for e in ev) and any(e.endswith("T00:00:00Z") for e in ev)

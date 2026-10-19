@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .collector import ProviderError, RateLimited, SchemaDrift, TransientError
+from .yfinance_adapter import FX_BAR_TIMEZONE
 
 SERIES_ID = "DEXKOUS"
 BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -73,8 +74,9 @@ def _fred_frame(obs: list[dict[str, str]]) -> pd.Series:
 
 def snapshot_bar_dates(fx: pd.DataFrame) -> pd.Series:
     """KRW per USD by Yahoo bar date. The bar is stamped one day after its date (end of the London day), see ``yfinance_adapter.fx_frame``."""
-    day = pd.to_datetime(fx.event_timestamp_utc, utc=True).dt.tz_convert(None).dt.normalize() - pd.Timedelta(days=1)
-    return pd.Series(fx.value.to_numpy(float), index=day.dt.strftime("%Y-%m-%d").to_numpy()).sort_index()
+    # the stamp is local midnight of the NEXT London day, so convert to London time first: in summer it is 23:00 UTC of the bar's own date
+    local = pd.to_datetime(fx.event_timestamp_utc, utc=True).dt.tz_convert(FX_BAR_TIMEZONE).dt.tz_localize(None).dt.normalize() - pd.Timedelta(days=1)
+    return pd.Series(fx.value.to_numpy(float), index=local.dt.strftime("%Y-%m-%d").to_numpy()).sort_index()
 
 
 def fx_crosscheck(fx: pd.DataFrame, client: FredClient) -> dict[str, Any]:
@@ -88,6 +90,14 @@ def fx_crosscheck(fx: pd.DataFrame, client: FredClient) -> dict[str, Any]:
                                         "max_p99_abs_rel_diff": MAX_P99_ABS_REL_DIFF, "max_abs_rel_diff": MAX_ABS_REL_DIFF}}
     failures: list[str] = []
     share = len(common) / len(inside) if len(inside) else 0.0
+    # where the unmatched FRED dates fall, to tell a snapshot gap from a calendar or alignment cause (calendar facts, not prices)
+    lost = inside.index.difference(ours.index)
+    lost_dt = pd.to_datetime(list(lost)) if len(lost) else pd.DatetimeIndex([])
+    out["snapshot_bars"] = len(ours)
+    out["unmatched_by_year"] = {str(y): int(n) for y, n in pd.Series(lost_dt.year).value_counts().sort_index().items()}
+    out["unmatched_by_weekday"] = {str(d): int(n) for d, n in pd.Series(lost_dt.day_name()).value_counts().items()}
+    out["unmatched_first"] = [str(d) for d in lost[:30]]
+    out["snapshot_only_bars"] = len(ours.index.difference(inside.index))
     out["matched_share"] = round(share, 4)
     if share < MIN_MATCHED_SHARE:
         failures.append(f"matched share {share:.3f} < {MIN_MATCHED_SHARE}")

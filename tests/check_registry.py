@@ -24,7 +24,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
                                                                   I + "test_research_sharding.py", I + "test_research_gaps.py", U + "test_daily_view.py",
                                                                   U + "test_cli.py::test_data_validate"],
                      "gaps": [("the pre-holdout research lane has run once on a real snapshot (Yahoo prices, ECOS rate; evidence class research_snapshot) and was verified from its files, but that is one snapshot and one lineage; "
-                              "a second run from the same inputs is not byte-identical (floating-point-sized differences, cause not isolated), the FRED exchange-rate cross-check exists as a separate workflow but has not been run on the snapshot, and the holdout is sealed, so the opening procedure is exercised only on a SYNTHETIC run; "
+                              "a second run from the same inputs is not byte-identical (floating-point-sized differences, cause not isolated), the FRED exchange-rate cross-check passed once on that snapshot (closeness only, not equality), and the holdout is sealed, so the opening procedure is exercised only on a SYNTHETIC run; "
                               "no claim of strategy validity follows")]},
     "INV-DATA-002": {"tier": "V0", "scope": "fixture_path", "tests": [U + "test_fixture_data.py::test_split_is_neutral", U + "test_fixture_data.py::test_raw_and_total_return",
                                                                   U + "test_fixture_data.py::test_dividend", U + "test_cli.py::test_data_validate",
