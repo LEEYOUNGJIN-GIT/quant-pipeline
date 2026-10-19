@@ -64,6 +64,8 @@ def test_only_the_forward_block_is_scored_not_the_valuations_before_its_start(ba
     owned = [s for s in base["block"].valuation_sessions if s in nav]
     assert out["intervals"] == len(owned) < len(nav) - 1, "the NAV holds pre-start valuations that must not be scored"
     assert min(owned) >= START
+    assert set(out["diagnostics"]) >= {"strategy", F.PRIMARY_BENCHMARK} and all(
+        len(d["largest_abs_interval_returns"]) == 3 for d in out["diagnostics"].values())
     for k, m in out["metrics"].items():
         assert m["intervals"] == len(owned) and -1.0 < m["total_return"] < 10.0, k
 

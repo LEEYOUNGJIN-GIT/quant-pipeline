@@ -121,6 +121,8 @@ def forward_run(p: ForwardPipeline, selection: Frozen, start_date: str = FORWARD
         "intervals": len(sessions), "decisions": block.n_decisions, "bootstrap_status": boot.status,
         "start_state": "opening holdings (cash); no continuation of the finished run's ledger",
         "rule": {"benchmark": PRIMARY_BENCHMARK, "verdicts": VERDICTS}}
+    out["diagnostics"] = {k: {"largest_abs_interval_returns": [(sessions[i], round(float(a[i]), 4)) for i in np.argsort(-np.abs(a))[:3]],
+                              "intervals_with_abs_return_over_20pct": int((np.abs(a) > 0.2).sum())} for k, a in arrays.items()}
     if boot.status != "ok":
         out["verdict"] = "insufficient_sample"
         return out
