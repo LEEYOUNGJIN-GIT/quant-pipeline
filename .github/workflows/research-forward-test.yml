@@ -65,6 +65,8 @@ jobs:
           openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl_old/snapshot.tar.gz.enc | tar -xzf - -C old
           OLD=$(ls old | grep -E '^[0-9a-f]{64}$' | head -1)
           uv run python tools/snapshot_prefix_diff.py --old "old/$OLD" --new "data/snapshots/research/$NEW_ID" --through 2024-12-31 --out prefix_diff.json
+      - name: Largest one-day moves per series (aggregates and dates only; the control window ends before the sealed holdout starts)
+        run: uv run python tools/price_jump_report.py --snapshot "data/snapshots/research/$NEW_ID" --from "${{ inputs.start }}" --out price_jumps.json
       - name: Run the forward test (frozen selection, no re-selection)
         run: |
           uv run python tools/forward_test.py --root . --finished-run "outputs/finished/${{ inputs.run_id }}" --out-root outputs/forward \
@@ -72,8 +74,8 @@ jobs:
       - name: Encrypt the result
         if: always()
         run: |
-          ls forward_result.json prefix_diff.json 2>/dev/null || exit 0
-          tar -czf - $(ls forward_result.json prefix_diff.json 2>/dev/null) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out forward.tar.gz.enc
+          ls forward_result.json prefix_diff.json price_jumps.json 2>/dev/null || exit 0
+          tar -czf - $(ls forward_result.json prefix_diff.json price_jumps.json 2>/dev/null) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out forward.tar.gz.enc
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
         with:
