@@ -1,0 +1,45 @@
+# Cross-check the USD/KRW series of an EXISTING encrypted snapshot against FRED DEXKOUS. It does not collect anything, so the snapshot id and every hash
+# stay as they are. Needs the repository secrets FRED_API_KEY and SNAPSHOT_PASSPHRASE; the log carries aggregate statistics only.
+name: research-fx-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      data_run_id:
+        description: "run id of the research-data workflow whose encrypted snapshot to check"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Check the secrets are present (values are never printed)
+        run: |
+          test -n "$FRED_API_KEY" || { echo "::error::repository secret FRED_API_KEY is not set"; exit 1; }
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Get and decrypt the snapshot
+        run: |
+          gh run download "${{ inputs.data_run_id }}" -n research-snapshot -D dl
+          mkdir -p snap
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/snapshot.tar.gz.enc | tar -xzf - -C snap
+          echo "SNAPSHOT_ID=$(ls snap | grep -E '^[0-9a-f]{64}$' | head -1)" >> "$GITHUB_ENV"
+      - name: Compare with FRED DEXKOUS
+        run: uv run python tools/fred_check.py --snapshot "snap/$SNAPSHOT_ID" --out fx_crosscheck.json

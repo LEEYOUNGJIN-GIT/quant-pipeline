@@ -1,7 +1,7 @@
 # PROGRESS
 
 Normative spec: `IMPLEMENTATION_SPEC.md` v5.3.2. This file is operational status only and never redefines the spec.
-Last updated: 2026-10-12.
+Last updated: 2026-10-19.
 
 ## Deviations from the spec (recorded, not silent)
 
@@ -546,3 +546,17 @@ Two full pre-holdout runs from the same snapshot and code (run ids 39138500192 a
 - Largest absolute numeric difference 7.968e-10 against the implementer's bound of 1e-6. The largest relative difference (0.4998) occurs on values near zero, so it says little on its own.
 - The runs are therefore not byte-identical. Cause not isolated: floating-point differences between runner CPUs are the likely explanation but were not measured. The 1e-6 bound is the implementer's choice, not a specification value.
 - Winner, branch and ticker fields show no difference in the compared fields.
+
+## Before opening the final holdout (checklist for the person who runs `research-holdout`, 2026-10-19)
+
+Nothing here opens it; the workflow stays human-triggered.
+
+- Inputs: `data_run_id=39136637764` (snapshot), `finished_run_id=39174911790` (finished pre-holdout run), `run_id=real3`, `acknowledgement=I_UNDERSTAND_THIS_OPENS_THE_FINAL_HOLDOUT`.
+- Retention: the snapshot (14 days) and the finished run (14 days) were created 2026-10-17/18, so both expire around 2026-10-31 to 2026-11-01. After that the opening needs a new collection, which is a different snapshot and a different holdout; its result is not comparable with real3.
+- One opening per lineage; afterwards the same holdout cannot be used for a fresh evaluation, so settle the universe and the limits in OQ-052, OQ-053, OQ-054 first.
+- Pre-holdout results are descriptive: strategy Sharpe 1.356 [1.048, 1.671] against equal_weight_periodic 1.471 [1.188, 1.779]; no claim of strategy validity.
+- Not done: FRED exchange-rate cross-check (needs a `FRED_API_KEY` repository secret); cause of the cross-run numeric differences.
+
+## FRED exchange-rate cross-check (2026-10-19)
+
+`src/quant_pipeline/fred_crosscheck.py`, `tools/fred_check.py` and the manually dispatched `research-fx-check` workflow compare the snapshot's USD/KRW bars with FRED `DEXKOUS` (H.10 noon rate) on matching dates. It reads the existing encrypted snapshot, collects nothing and changes no hash. The criteria are fixed in code before any real comparison: matched share >= 0.90, median |relative difference| <= 0.5%, 99th percentile <= 2%, maximum <= 5% (implementer choices; Yahoo's bar closes at the end of the London day and H.10 is a New York noon quote, so this checks closeness, not equality). Offline tests use hand-made responses (`tests/unit/test_fred_crosscheck.py`). Not yet run on the real snapshot: a new workflow file can be dispatched only once it is on main.
