@@ -63,7 +63,15 @@ def test_fred_missing_marker_is_skipped_not_zero():
 
 def test_the_report_holds_no_series_values():
     r = F.fx_crosscheck(snapshot_fx(BASE), FakeFred(BASE))
-    assert all(not isinstance(v, list) or k in {"range", "worst_dates", "failures"} for k, v in r.items())
+    assert all(not isinstance(v, list) or k in {"range", "worst_dates", "failures", "unmatched_first"} for k, v in r.items())
+
+
+def test_unmatched_dates_are_located_by_year_and_weekday():
+    fx = snapshot_fx(BASE)
+    fx = fx[~fx.event_timestamp_utc.str.startswith("2021-03-0")].reset_index(drop=True)  # drops the bars of 2021-03-01..09 minus one day
+    r = F.fx_crosscheck(fx, FakeFred(BASE))
+    assert r["unmatched_by_year"] == {"2021": sum(r["unmatched_by_weekday"].values())} and r["unmatched_first"][0].startswith("2021-03-0")
+    assert r["snapshot_bars"] == len(fx) and r["snapshot_only_bars"] == 0
 
 
 def test_a_malformed_response_is_schema_drift():
