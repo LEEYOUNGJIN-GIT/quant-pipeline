@@ -21,7 +21,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
                      "gaps": []},
     "INV-DATA-001": {"tier": "V0", "scope": "static", "tests": [U + "test_research_universe.py", U + "test_snapshot.py", U + "test_research_row_map.py", U + "test_research_plan.py", U + "test_research_engine.py", U + "test_hmm_lane.py", U + "test_research_trials.py",
                                                                   I + "test_research_pipeline.py", I + "test_research_invariance.py", I + "test_research_holdout.py",
-                                                                  I + "test_research_sharding.py", I + "test_research_gaps.py", U + "test_daily_view.py",
+                                                                  I + "test_research_sharding.py", I + "test_research_gaps.py", I + "test_forward_test.py", U + "test_daily_view.py",
                                                                   U + "test_cli.py::test_data_validate"],
                      "gaps": [("the pre-holdout research lane has run once on a real snapshot (Yahoo prices, ECOS rate; evidence class research_snapshot) and was verified from its files, but that is one snapshot and one lineage; "
                               "a second run from the same inputs is not byte-identical (floating-point-sized differences, cause not isolated), the FRED exchange-rate cross-check passed once on that snapshot (closeness only, not equality), and the holdout is sealed, so the opening procedure is exercised only on a SYNTHETIC run; "
