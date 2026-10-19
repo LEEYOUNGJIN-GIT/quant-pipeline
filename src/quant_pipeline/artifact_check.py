@@ -6,6 +6,9 @@ repaired.
 from __future__ import annotations
 
 import json
+import math
+import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -103,3 +106,87 @@ def compare_runs(a: Path, b: Path, ignore_suffixes: tuple[str, ...] = ()) -> dic
     different = sorted(k for k in set(x) & set(y) if x[k] != y[k] and not k.endswith(ignore_suffixes))
     return {"same_files": not only_a and not only_b, "only_in_first": only_a[:5], "only_in_second": only_b[:5], "different": different[:10], "n_different": len(different),
             "identical": not only_a and not only_b and not different}
+
+
+# Content hashes computed from fields this comparison already examines one by one (plan_hash = hash of the plan body; replay_hash = hash of the plan hashes).
+# They differ exactly when some underlying number differs, so they are reported apart and are not a second, independent difference.
+DERIVED_HASH_FIELDS = frozenset({"plan_hash", "replay_hash"})
+MAX_ABS_DIFFERENCE = 1e-6  # the implementer's bound on numeric differences between runs on other hardware (observed: 8e-10)
+
+
+def _walk(a: Any, b: Any, path: str, out: dict[str, Any]) -> None:
+    """Compare two JSON values leaf by leaf: numbers by absolute and relative difference, everything else (keys, strings, booleans, shapes) exactly."""
+    numeric = (isinstance(a, (int, float)) and not isinstance(a, bool)) and (isinstance(b, (int, float)) and not isinstance(b, bool))
+    if not numeric:
+        if isinstance(a, dict) and isinstance(b, dict):
+            if set(a) != set(b):
+                out["categorical"].append(f"{path}: keys differ")
+            for k in set(a) & set(b):
+                _walk(a[k], b[k], f"{path}/{k}", out)
+        elif isinstance(a, list) and isinstance(b, list):
+            if len(a) != len(b):
+                out["categorical"].append(f"{path}: length {len(a)} vs {len(b)}")
+            for i, (u, v) in enumerate(zip(a, b, strict=False)):
+                _walk(u, v, f"{path}[{i}]", out)
+        elif isinstance(a, str) and isinstance(b, str) and a != b and _decimal_pair(a, b):
+            _number(float(a), float(b), out)  # amounts are stored as decimal strings: a number, not a label
+        elif a != b:
+            if path.rsplit("/", 1)[-1] in DERIVED_HASH_FIELDS:
+                out["derived"].append(path)
+            else:
+                out["categorical"].append(f"{path}: {type(a).__name__} differs")
+        return
+    _number(float(a), float(b), out)
+
+
+def _decimal_pair(a: str, b: str) -> bool:
+    try:
+        float(a)
+        float(b)
+    except ValueError:
+        return False
+    return not (a.startswith(("sha256:", "0x")))
+
+
+def _number(x: float, y: float, out: dict[str, Any]) -> None:
+    if x == y or (math.isnan(x) and math.isnan(y)):
+        return
+    diff = abs(x - y)
+    rel = diff / max(abs(x), abs(y), 1e-300)
+    out["max_abs"], out["max_rel"], out["n_numeric"] = max(out["max_abs"], diff), max(out["max_rel"], rel), out["n_numeric"] + 1
+
+
+def compare_numeric(a: Path, b: Path) -> dict[str, Any]:
+    """Where two runs' differing artifacts differ, and by how much: JSON files are compared leaf by leaf (numeric noise versus a different string, key, shape
+    or selected hash); other files (reports) are only counted. A run on other hardware can differ in the last bits; it must not differ categorically."""
+    x, y = _artifact_bytes(Path(a)), _artifact_bytes(Path(b))
+    files = sorted(k for k in set(x) & set(y) if x[k] != y[k])
+    per_file: dict[str, dict[str, Any]] = {}
+    other = []
+    for k in files:
+        if not k.endswith(".json"):
+            other.append(k)
+            continue
+        rec: dict[str, Any] = {"categorical": [], "derived": [], "max_abs": 0.0, "max_rel": 0.0, "n_numeric": 0}
+        try:
+            _walk(json.loads(x[k]), json.loads(y[k]), "", rec)
+        except ValueError:
+            rec["categorical"].append("not parseable as JSON")
+        per_file[k] = rec
+    categorical = {k: v["categorical"][:3] for k, v in per_file.items() if v["categorical"]}
+    derived: Counter[str] = Counter()
+    for k, v in per_file.items():
+        for path in v["derived"]:
+            derived[f"{k.rsplit('/', 1)[-1]} {re.sub(r'\[\d+\]', '[*]', path)}"] += 1
+    fields: Counter[str] = Counter()
+    for k, v in per_file.items():
+        for c in v["categorical"]:
+            where, _, what = c.partition(": ")
+            fields[f"{k.rsplit('/', 1)[-1]} {re.sub(r'\[\d+\]', '[*]', where)} ({what})"] += 1
+    numeric_only = {k: v for k, v in per_file.items() if not v["categorical"]}
+    worst = sorted(((v["max_rel"], k) for k, v in numeric_only.items()), reverse=True)[:5]
+    return {"n_differing_files": len(files), "n_json": len(per_file), "n_other": len(other), "other_files": other[:10],
+            "categorical": categorical, "categorical_fields": fields.most_common(25), "derived_hash_differences": derived.most_common(), "max_abs": max([v["max_abs"] for v in per_file.values()], default=0.0),
+            "max_rel": max([v["max_rel"] for v in per_file.values()], default=0.0), "worst_numeric": [(k, r) for r, k in worst],
+            "no_categorical_difference": not categorical, "within_numeric_bound": max([v["max_abs"] for v in per_file.values()], default=0.0) <= MAX_ABS_DIFFERENCE,
+            "same_files": set(x) == set(y)}

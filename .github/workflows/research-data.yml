@@ -17,7 +17,7 @@ on:
       dividend_payers:
         description: "asset ids expected to pay dividends regularly (comma separated)"
         required: false
-        default: "005930.KS,005380.KS,069500.KS,SPY,IEF,TLT,EEM"
+        default: "005930.KS,005380.KS,SPY,IEF,TLT,EEM"
 
 permissions:
   contents: read

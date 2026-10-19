@@ -89,15 +89,50 @@ def test_plan_refuses_a_snapshot_that_does_not_verify(tmp_path):
     assert not (root / "outputs" / "runs" / "bad").exists()
 
 
-def test_a_missing_observation_on_a_complete_case_session_halts_the_data_check(tmp_path):
-    def drop(tables):
-        tr = tables["prices_total_return"]
-        victim = tr[(tr.instrument_id == "R01")].exchange_session.iloc[400]
-        tables["prices_total_return"] = tr[~((tr.instrument_id == "R01") & (tr.exchange_session == victim))]
+def _drop(asset, positions):
+    """The provider has no bar for the asset on those sessions: raw close and total-return index both lack them, as a real gap does."""
+    def mutate(tables):
+        sessions = set(tables["prices_total_return"].query("instrument_id == @asset").exchange_session.iloc[list(positions)])
+        for name in ("prices_raw", "prices_total_return"):
+            t = tables[name]
+            tables[name] = t[~((t.instrument_id == asset) & t.exchange_session.isin(sessions))]
+    return mutate
 
-    root, _ = build_research_repo(tmp_path, mutate=drop)
+
+def test_a_few_unobserved_sessions_are_excluded_from_the_complete_case_rows_not_filled(tmp_path):
+    from quant_pipeline.calendars import Calendars, build_row_map, window_from_manifest
+    from quant_pipeline.data import load_market_data
+    from quant_pipeline.panels import daily_panel
+    from quant_pipeline.snapshot import load_research_context, research_unobserved
+
+    root, _ = build_research_repo(tmp_path, mutate=_drop("R01", [400, 900]))
+    results = {r["check"]: r for r in validate_data(CFG, root)}
+    assert results["complete_case_coverage"]["status"] == "pass" and "2 of" in results["complete_case_coverage"]["detail"]
+    assert [r for r in results.values() if r["status"] != "pass"] == []
+    cfg, snap = load_research_context(CFG, root)
+    cals = Calendars.load(list(cfg.calendars.required))
+    gaps = research_unobserved(cfg, snap, cals)
+    assert len(gaps) == 2
+    rm, sess = build_row_map(cfg, cals, window_from_manifest(snap.manifest), unobserved=gaps)
+    clean, _ = build_row_map(cfg, cals, window_from_manifest(snap.manifest))
+    assert len(rm.complete_case) == len(clean.complete_case) - 2 and not gaps & {s.strftime("%Y-%m-%d") for s in rm.complete_case}
+    # the row map and the data-driven panel agree on the complete-case rows (the engine uses both), and no zero was inserted
+    md = load_market_data(cfg, root)
+    panel = daily_panel(md.total_return, cals, sess["XNYS"], cfg.availability.price_publication_delay)
+    flagged = {r.session_date for r in panel[panel.complete_case].itertuples()}
+    assert flagged == {s.strftime("%Y-%m-%d") for s in rm.complete_case}
+    gap_rows = panel[panel.session_date.isin(gaps)]
+    assert gap_rows["R01_return"].isna().all() and not gap_rows["R01_updated"].any()
+    assert cli(root, "plan", "--run-id", "gappy").exit_code == 0
+
+
+def test_too_many_or_too_long_unobserved_runs_halt_the_data_check(tmp_path):
+    root, _ = build_research_repo(tmp_path / "run", mutate=_drop("R01", range(400, 405)))
     failed = {r["check"]: r["detail"] for r in validate_data(CFG, root) if r["status"] != "pass"}
-    assert "complete_case_coverage" in failed and "R01" in failed["complete_case_coverage"]
+    assert "complete_case_coverage" in failed and "longest run 5" in failed["complete_case_coverage"]
+    root, _ = build_research_repo(tmp_path / "share", mutate=_drop("R01", range(100, 2000, 60)))
+    failed = {r["check"]: r["detail"] for r in validate_data(CFG, root) if r["status"] != "pass"}
+    assert "complete_case_coverage" in failed and "limits" in failed["complete_case_coverage"]
 
 
 def test_a_window_too_short_for_one_outer_fold_is_reported_not_truncated(tmp_path):

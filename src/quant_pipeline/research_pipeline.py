@@ -52,7 +52,10 @@ class ResearchPipeline(FixturePipeline):
 
     def _build_row_map(self):
         assert self.snapshot is not None
-        return build_row_map(self.cfg, self.cals, window_from_manifest(self.snapshot.manifest))
+        from .snapshot import research_unobserved
+
+        self._unobserved = research_unobserved(self.cfg, self.snapshot, self.cals)
+        return build_row_map(self.cfg, self.cals, window_from_manifest(self.snapshot.manifest), unobserved=self._unobserved)
 
     def _regime_source(self) -> HMMRegimeSource:
         self.hmm = HMMRegimeSource(self.cfg, self.md, self.cals, self.sess)
@@ -103,7 +106,7 @@ class ResearchPipeline(FixturePipeline):
         return {"snapshot_id": self.snapshot.snapshot_id, "provider": manifest.get("provider", {}).get("name", "unknown"),
                 "license": manifest.get("provider", {}).get("license") or "not declared",
                 "window": f"{manifest['request']['start']} to {manifest['request']['end']}", "assets": list(manifest["request"]["assets"]),
-                "decisions": decisions, "hmm": {"n_fits": hmm["n_fits"], "refits": len({f["refit_id"] for f in hmm["fits"]}),
+                "unobserved_sessions": sorted(self._unobserved), "decisions": decisions, "hmm": {"n_fits": hmm["n_fits"], "refits": len({f["refit_id"] for f in hmm["fits"]}),
                                                  "all_converged": hmm["all_converged"], "seed_stream": hmm["seed_stream"]}}
 
     def _summary(self, runs) -> dict[str, Any]:

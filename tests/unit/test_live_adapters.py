@@ -154,3 +154,15 @@ def test_ecos_errors_never_leak_the_key_and_map_to_provider_error_kinds(monkeypa
     with pytest.raises(ProviderError, match="not set"):
         monkeypatch.delenv("ECOS_API_KEY", raising=False)
         E.RealEcosClient()
+
+
+def test_the_provider_terms_printed_in_the_research_report_pass_the_terminology_scan():
+    """The first real-data run reached the pre-holdout report and stopped there: the Yahoo terms said 'no accuracy guarantee', and the scan forbids the
+    word 'guarantee' (it cannot tell a disclaimer from a claim). Every provider's terms are printed in report section 10, so they must scan clean."""
+    from quant_pipeline.ecos_adapter import EcosProvider
+    from quant_pipeline.reporting import scan_terminology
+    from quant_pipeline.yfinance_adapter import YahooProvider
+
+    for terms in (YahooProvider.license, EcosProvider.license, f"{YahooProvider.license}; {EcosProvider.license}"):
+        assert scan_terminology(terms)["forbidden"] == [], terms
+    assert scan_terminology("no service-level or accuracy guarantee")["forbidden"] == ["proof / guarantee claim"]  # the old wording is what failed

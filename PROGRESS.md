@@ -536,3 +536,13 @@ Workflows (public repository, so every product leaves a job only as an AES-256 e
 The first attempt (run 39002301995) failed in the finishing job with `lineage_mismatch:data_manifest_hash`: every job built its own synthetic snapshot, and the builds are not guaranteed to agree to the last bit across runner CPUs (the generator uses `np.exp`/`np.sin`). The cause is the working explanation, not something measured: the second run, which builds the snapshot once in a `data` job and shares it as an artifact, passed. The real `research-run` already shares one encrypted snapshot, so it never had this exposure.
 
 Consequence for planning: the 24 hour budget is not binding on hosted runners; the inner selection that took about 11 hours sequentially takes under 20 minutes when sharded 16 ways. What remains for a real result is the data (secrets `ECOS_API_KEY`, `SNAPSHOT_PASSPHRASE` and the provider terms), not compute.
+
+## Cross-run reproducibility on real data (2026-10-19)
+
+Two full pre-holdout runs from the same snapshot and code (run ids 39138500192 and 39174911790), compared by `verify_artifacts.py --compare-numeric` (workflow run 39177600827, verify job passed):
+
+- 85 JSON artifacts differ byte-wise; no other file type differs; the file lists are identical.
+- Categorical differences: none, once `plan_hash` (x2182 in decisions.json and plans.json) and `replay_hash` (x756 in outcomes.json) are classed as derived hashes (they are hashes over content that contains the numeric fields, so they differ whenever any number does).
+- Largest absolute numeric difference 7.968e-10 against the implementer's bound of 1e-6. The largest relative difference (0.4998) occurs on values near zero, so it says little on its own.
+- The runs are therefore not byte-identical. Cause not isolated: floating-point differences between runner CPUs are the likely explanation but were not measured. The 1e-6 bound is the implementer's choice, not a specification value.
+- Winner, branch and ticker fields show no difference in the compared fields.

@@ -230,6 +230,7 @@ def plan(config: CONFIG_OPT, run_id: Annotated[str | None, typer.Option("--run-i
     root = repo_root.resolve()
     cfg = load_config(config)
     window = None
+    snap = None
     if cfg.data.mode != "fixture":
         from .calendars import window_from_manifest
         from .snapshot import SnapshotResolutionError, load_research_context
@@ -242,7 +243,12 @@ def plan(config: CONFIG_OPT, run_id: Annotated[str | None, typer.Option("--run-i
         window = window_from_manifest(snap.manifest)
     cals = Calendars.load(list(cfg.calendars.required))
     try:
-        rm, _ = build_row_map(cfg, cals, window)
+        unobserved = frozenset()
+        if snap is not None:
+            from .snapshot import research_unobserved
+
+            unobserved = research_unobserved(cfg, snap, cals)
+        rm, _ = build_row_map(cfg, cals, window, unobserved=unobserved)
     except ValueError as e:
         typer.echo(f"plan refused: {e}", err=True)
         raise typer.Exit(2) from e

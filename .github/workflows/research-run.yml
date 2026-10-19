@@ -22,6 +22,18 @@ on:
         description: "optional: run id of an earlier research-run whose merged checkpoints the finishing job continues from"
         required: false
         default: ""
+      compare_workflow_run_id:
+        description: "optional: id of an earlier research-run (same snapshot, same run id) to compare this run with (numerically; other hardware may differ in the last bits, never categorically)"
+        required: false
+        default: ""
+      compare_only:
+        description: "true: compute nothing, only verify the finished run of source_workflow_run_id and compare it with compare_workflow_run_id"
+        required: false
+        default: "false"
+      source_workflow_run_id:
+        description: "with compare_only: id of the research-run whose finished run is verified"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -33,6 +45,7 @@ env:
 
 jobs:
   plan:
+    if: inputs.compare_only != 'true'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
@@ -45,6 +58,7 @@ jobs:
 
   shard:
     needs: plan
+    if: inputs.compare_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 355
     strategy:
@@ -155,3 +169,41 @@ jobs:
           path: finished.tar.gz.enc
           retention-days: 14
           if-no-files-found: warn
+
+  verify:
+    needs: finish
+    if: always() && (needs.finish.result == 'success' || inputs.compare_only == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+
+      - name: Get and decrypt the finished run
+        run: |
+          gh run download "${{ inputs.compare_only == 'true' && inputs.source_workflow_run_id || github.run_id }}" -n "finished-${{ inputs.run_id }}" -D dl
+          mkdir -p runs
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/finished.tar.gz.enc | tar -xzf - -C runs
+
+      - name: Verify the artifacts from the files alone
+        run: uv run python tools/verify_artifacts.py "runs/${{ inputs.run_id }}"
+
+      - name: Aggregate summary (no prices, weights or per-date values)
+        run: uv run python tools/run_summary.py "runs/${{ inputs.run_id }}"
+
+      - name: Compare with an earlier run (numerically; categorical differences fail)
+        if: inputs.compare_workflow_run_id != ''
+        run: |
+          gh run download "${{ inputs.compare_workflow_run_id }}" -n "finished-${{ inputs.run_id }}" -D dl2
+          mkdir -p runs2
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl2/finished.tar.gz.enc | tar -xzf - -C runs2
+          uv run python tools/verify_artifacts.py "runs/${{ inputs.run_id }}" --compare "runs2/${{ inputs.run_id }}" --compare-numeric
