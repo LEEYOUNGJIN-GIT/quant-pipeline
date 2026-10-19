@@ -1,0 +1,83 @@
+# Forward test: apply the FROZEN final selection of a finished run to dates after its data window, using a LONGER snapshot from research-data
+# (run with end=2026-09-30). Nothing is selected and the sealed holdout of the finished run is neither opened nor evaluated; see tools/forward_test.py for
+# the pre-registered interval and decision rule. Needs SNAPSHOT_PASSPHRASE only. The log carries aggregate statistics; the detail is an encrypted artifact.
+name: research-forward-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      new_data_run_id:
+        description: "run id of the research-data workflow that collected the LONGER snapshot"
+        required: true
+      finished_run_id:
+        description: "run id of the finished research-run workflow whose frozen selection is applied"
+        required: true
+      old_data_run_id:
+        description: "optional: run id of the research-data workflow of the finished run (to compare the overlapping years)"
+        required: false
+        default: ""
+      run_id:
+        description: "research run id of the finished run"
+        required: false
+        default: "real3"
+      start:
+        description: "first date of the forward interval (pre-registered default; change only with a written reason)"
+        required: false
+        default: "2025-01-02"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  forward:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Get and decrypt the longer snapshot and the finished run
+        run: |
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+          gh run download "${{ inputs.new_data_run_id }}" -n research-snapshot -D dl_new
+          mkdir -p data/snapshots/research outputs/finished
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl_new/snapshot.tar.gz.enc | tar -xzf - -C data/snapshots/research
+          ID=$(ls data/snapshots/research | grep -E '^[0-9a-f]{64}$' | head -1)
+          ln -sfn "$ID" data/snapshots/research/current
+          echo "NEW_ID=$ID" >> "$GITHUB_ENV"
+          gh run download "${{ inputs.finished_run_id }}" -n "finished-${{ inputs.run_id }}" -D fin
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in fin/finished.tar.gz.enc | tar -xzf - -C outputs/finished
+      - name: Compare the overlapping years with the snapshot the selection was made on (aggregates only)
+        if: inputs.old_data_run_id != ''
+        run: |
+          gh run download "${{ inputs.old_data_run_id }}" -n research-snapshot -D dl_old
+          mkdir -p old
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl_old/snapshot.tar.gz.enc | tar -xzf - -C old
+          OLD=$(ls old | grep -E '^[0-9a-f]{64}$' | head -1)
+          uv run python tools/snapshot_prefix_diff.py --old "old/$OLD" --new "data/snapshots/research/$NEW_ID" --through 2024-12-31 --out prefix_diff.json
+      - name: Run the forward test (frozen selection, no re-selection)
+        run: |
+          uv run python tools/forward_test.py --root . --finished-run "outputs/finished/${{ inputs.run_id }}" --out-root outputs/forward \
+            --run-id forward --start "${{ inputs.start }}" --json-out forward_result.json
+      - name: Encrypt the result
+        if: always()
+        run: |
+          ls forward_result.json prefix_diff.json 2>/dev/null || exit 0
+          tar -czf - $(ls forward_result.json prefix_diff.json 2>/dev/null) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out forward.tar.gz.enc
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: forward-${{ inputs.run_id }}
+          path: forward.tar.gz.enc
+          retention-days: 90
+          if-no-files-found: warn

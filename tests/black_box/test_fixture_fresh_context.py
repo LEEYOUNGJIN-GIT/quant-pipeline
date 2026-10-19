@@ -304,7 +304,7 @@ def test_independent_oracle_files_reproduce_exactly_in_the_fresh_context(world):
 # say so: the only check that may be left unmatched is INV-DATA-001, and only because of exactly these files.
 HEAVY_RESEARCH_EVIDENCE = frozenset({"tests/integration/test_research_pipeline.py", "tests/integration/test_research_invariance.py",
                                      "tests/integration/test_research_holdout.py", "tests/integration/test_research_sharding.py",
-                                     "tests/integration/test_research_gaps.py"})
+                                     "tests/integration/test_research_gaps.py", "tests/integration/test_forward_test.py"})
 
 
 def test_verify_py_runs_inside_the_network_denied_fresh_context_and_reports_the_same_lineage(world):
