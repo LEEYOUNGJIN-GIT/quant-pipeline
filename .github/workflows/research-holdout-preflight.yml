@@ -1,0 +1,57 @@
+# Read-only check, run BEFORE research-holdout: the finished pre-holdout run must still load under the code of the ref this workflow runs from.
+# The lineage holds a hash of every .py file of the package, so a ref whose src/ differs from the one that produced the run refuses to load it
+# (LineageMismatch). Nothing here opens the holdout; the run is only re-finished in a scratch directory and verified from its files.
+name: research-holdout-preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      data_run_id:
+        description: "run id of the research-data workflow (snapshot)"
+        required: true
+      finished_run_id:
+        description: "run id of the finished research-run workflow"
+        required: true
+      run_id:
+        description: "research run id (as used in research-run)"
+        required: false
+        default: "real3"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Get and decrypt the snapshot and the finished run
+        run: |
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+          gh run download "${{ inputs.data_run_id }}" -n research-snapshot -D dl
+          mkdir -p data/snapshots/research outputs/runs
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/snapshot.tar.gz.enc | tar -xzf - -C data/snapshots/research
+          ID=$(ls data/snapshots/research | grep -E '^[0-9a-f]{64}$' | head -1)
+          ln -sfn "$ID" data/snapshots/research/current
+          gh run download "${{ inputs.finished_run_id }}" -n "finished-${{ inputs.run_id }}" -D fin
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in fin/finished.tar.gz.enc | tar -xzf - -C outputs/runs
+      - name: Re-finish the run from its checkpoints (fails with lineage_mismatch if this ref's code differs from the run's)
+        run: |
+          uv run python -m quant_pipeline.research_pipeline --run-id "${{ inputs.run_id }}" --out-root outputs/runs \
+            --config configs/research_8_12asset.yaml --projection-out projection.json
+          echo "lineage accepted: the checkpoints of ${{ inputs.run_id }} load under this ref"
+      - name: Verify the artifacts from the files alone (the holdout must still be sealed)
+        run: uv run python tools/verify_artifacts.py "outputs/runs/${{ inputs.run_id }}"
