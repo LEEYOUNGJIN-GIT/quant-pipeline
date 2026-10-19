@@ -46,6 +46,26 @@ def largest_moves(df: pd.DataFrame, group: str, value: str, lo: str, hi: str, to
     return out
 
 
+def dividend_yields(ca: pd.DataFrame, raw: pd.DataFrame, lo: str, hi: str, top: int = TOP) -> dict[str, Any]:
+    """Per instrument: the largest cash dividend relative to the last raw close on or before its ex date, with the declared currency."""
+    close = raw[raw["field"] == "close"].assign(_d=_dates(raw[raw["field"] == "close"])).sort_values("_d")
+    div = ca[ca["action_type"] == "cash_dividend"].copy()
+    div["ex_day"] = pd.to_datetime(div["ex_timestamp_utc"], utc=True).dt.strftime("%Y-%m-%d")
+    div = div[(div["ex_day"] >= lo) & (div["ex_day"] <= hi)]
+    out: dict[str, Any] = {}
+    for key, g in div.groupby("instrument_id"):
+        c = close[close["instrument_id"] == key]
+        rows = []
+        for r in g.itertuples():
+            prior = c[c["_d"] <= r.ex_day]
+            if prior.empty:
+                continue
+            rows.append((r.ex_day, round(float(r.cash_amount) / float(prior["value"].iloc[-1]), 5), str(r.cash_currency), str(prior["currency"].iloc[-1])))
+        rows.sort(key=lambda x: -x[1])
+        out[str(key)] = {"dividends": len(g), "largest_yield": rows[:top]}
+    return out
+
+
 def report(snapshot: Path, lo: str, hi: str, since: str) -> dict[str, Any]:
     raw = pd.read_parquet(snapshot / "prices_raw.parquet")
     tr = pd.read_parquet(snapshot / "prices_total_return.parquet")
@@ -59,6 +79,7 @@ def report(snapshot: Path, lo: str, hi: str, since: str) -> dict[str, Any]:
                            "raw_close": largest_moves(keyed(raw), "series", "value", lo, hi),
                            "total_return": largest_moves(keyed(tr), "series", "value", lo, hi),
                            "fx": largest_moves(fx, "pair_id", "value", lo, hi)}
+    out["dividend_yield"] = dividend_yields(ca, raw, lo, hi)
     after = ca[pd.to_datetime(ca["ex_timestamp_utc"], utc=True) >= pd.Timestamp(since, tz="UTC")]
     out["corporate_actions_since"] = {"since": since, "count": len(after),
                                       "by_type": {str(k): int(v) for k, v in after.groupby("action_type").size().items()},

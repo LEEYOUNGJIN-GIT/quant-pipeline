@@ -29,3 +29,11 @@ def test_moves_outside_the_window_are_ignored():
     df = prices([100.0, 300.0, 301.0, 302.0])
     r = J.largest_moves(df.assign(series="A|close"), "series", "value", "2025-05-05", "2025-05-30")
     assert r["A|close"]["over_20pct"] == 0
+
+
+def test_a_dividend_is_related_to_the_last_close_before_its_ex_date_and_keeps_its_currency():
+    raw = prices([100.0, 100.0, 100.0]).assign(currency="KRW")
+    ca = pd.DataFrame({"instrument_id": ["A"], "action_type": ["cash_dividend"], "ex_timestamp_utc": ["2025-05-05T00:00:00Z"],
+                       "cash_amount": [2.0], "cash_currency": ["KRW"]})
+    r = J.dividend_yields(ca, raw, "2025-05-01", "2025-05-30")
+    assert r["A"]["largest_yield"] == [("2025-05-05", 0.02, "KRW", "KRW")]
