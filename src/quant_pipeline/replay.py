@@ -121,8 +121,8 @@ class LedgerRunner:
                         self.ledger.holdings[e.asset_id], int(p["num"]), int(p["den"]),
                         self.cfg.accounting.corporate_action_reconciliation.split_relative_tolerance)  # level 1: halts on a residual above tolerance
                     note = "split_quantity_adjust"
-            else:  # dividend pay: the quantity held at the ex event, credited in KRW at the latest available FX
-                fx = self.md.fx_mark(e.ts)
+            else:  # dividend pay: the quantity held at the ex event; a USD dividend is credited in KRW at the latest available FX, a KRW one as is
+                fx = self.md.fx_mark(e.ts) if self.ccy[e.asset_id] == "USD" else Decimal(1)
                 held = self.entitlement.get(e.order_id.removesuffix("-pay"), 0)
                 self.ledger.cash = quantize_money(self.ledger.cash + Decimal(held) * Decimal(str(p["cash_amount"])) * fx, self.places)
                 note = f"dividend_credit_fx={fx}"

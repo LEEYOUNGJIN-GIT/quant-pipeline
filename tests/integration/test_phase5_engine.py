@@ -228,3 +228,15 @@ def test_nav_series_covers_every_xnys_anchor_exactly_once(straight):
     assert list(r.nav) == anchors
     assert r.nav[anchors[0]] == Decimal("1000000000.00")
     assert np.isfinite([float(v) for v in r.nav.values()]).all()
+
+
+def test_a_krw_dividend_is_credited_in_krw_without_an_fx_factor_and_a_usd_dividend_with_one(straight):
+    from quant_pipeline.event_time import Event
+    from quant_pipeline.replay import LedgerRunner
+    runner = LedgerRunner(CFG, MD, CALS, Decimal("0.00"), {"KRX_A": 100, "NYSE_C": 100}, OPEN.ts)
+    ts = utc("2024-02-01T06:30:00Z")
+    runner.entitlement.update({"K-pay".removesuffix("-pay"): 100, "U": 100})
+    runner.step(Event(ts, "corporate_action", "XKRX", "KRX_A", "K-pay", {"action_type": "cash_dividend", "phase": "pay", "cash_amount": 50.0}))
+    assert runner.ledger.cash == Decimal("5000.00"), "a KRW dividend must not be multiplied by the KRW-per-USD rate"
+    runner.step(Event(ts, "corporate_action", "XNYS", "NYSE_C", "U-pay", {"action_type": "cash_dividend", "phase": "pay", "cash_amount": 1.0}))
+    assert runner.ledger.cash == Decimal("5000.00") + Decimal(100) * MD.fx_mark(ts)
