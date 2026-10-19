@@ -110,7 +110,7 @@ constraints: {long_only: true, target_cash_floor: 0.05, minimum_post_trade_cash_
 solver_policy:
   primary: {solver: OSQP, eps_abs: 1.0e-7, eps_rel: 1.0e-7, max_iter: 20000}
   acceptance: {primal_residual_max: 1.0e-8, dual_residual_max: 1.0e-7}
-  numerical_retry: {maximum_retries: 1, eps_abs: 1.0e-8, eps_rel: 1.0e-8, max_iter: 100000, polish: true}
+  numerical_retry: {maximum_retries: 1, eps_abs: 1.0e-9, eps_rel: 1.0e-9, max_iter: 100000, polish: true}
   primal_infeasible_verification: {require_certificate: true, require_phase1_confirmation: true}
   fallback_chain: [accept_if_valid, retry_once, hold_previous_if_within_B_final, use_marked_holdings_at_first_decision, emergency_sell_only_if_over_B_final, halt]
   on_dual_infeasible: halt
