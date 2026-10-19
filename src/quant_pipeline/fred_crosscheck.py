@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .collector import ProviderError, RateLimited, SchemaDrift, TransientError
+from .yfinance_adapter import FX_BAR_TIMEZONE
 
 SERIES_ID = "DEXKOUS"
 BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -73,8 +74,9 @@ def _fred_frame(obs: list[dict[str, str]]) -> pd.Series:
 
 def snapshot_bar_dates(fx: pd.DataFrame) -> pd.Series:
     """KRW per USD by Yahoo bar date. The bar is stamped one day after its date (end of the London day), see ``yfinance_adapter.fx_frame``."""
-    day = pd.to_datetime(fx.event_timestamp_utc, utc=True).dt.tz_convert(None).dt.normalize() - pd.Timedelta(days=1)
-    return pd.Series(fx.value.to_numpy(float), index=day.dt.strftime("%Y-%m-%d").to_numpy()).sort_index()
+    # the stamp is local midnight of the NEXT London day, so convert to London time first: in summer it is 23:00 UTC of the bar's own date
+    local = pd.to_datetime(fx.event_timestamp_utc, utc=True).dt.tz_convert(FX_BAR_TIMEZONE).dt.tz_localize(None).dt.normalize() - pd.Timedelta(days=1)
+    return pd.Series(fx.value.to_numpy(float), index=local.dt.strftime("%Y-%m-%d").to_numpy()).sort_index()
 
 
 def fx_crosscheck(fx: pd.DataFrame, client: FredClient) -> dict[str, Any]:
