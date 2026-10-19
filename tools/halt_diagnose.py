@@ -27,7 +27,7 @@ def describe(inp, res, previous_target) -> dict:
     free = 1e9
     out = {
         "decision_call": _calls["n"],
-        "result": {"mode": res.mode, "status": res.status, "halt_reason": res.halt_reason, "notes": list(res.notes or ())},
+        "result": {"branch": res.branch, "status": res.status, "halt_reason": res.halt_reason, "notes": list(res.notes or ())},
         "attempts": [{k: a.get(k) for k in ("attempt", "status", "prim_res", "dual_res", "max_violation", "accepted", "infeasibility_confirmed")}
                      for a in res.attempts],
         "marked_holdings_violations": {k: round(v, 8) for k, v in hard_constraint_violations(inp.w_minus, inp, free).items()},
