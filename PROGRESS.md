@@ -556,3 +556,7 @@ Nothing here opens it; the workflow stays human-triggered.
 - One opening per lineage; afterwards the same holdout cannot be used for a fresh evaluation, so settle the universe and the limits in OQ-052, OQ-053, OQ-054 first.
 - Pre-holdout results are descriptive: strategy Sharpe 1.356 [1.048, 1.671] against equal_weight_periodic 1.471 [1.188, 1.779]; no claim of strategy validity.
 - Not done: FRED exchange-rate cross-check (needs a `FRED_API_KEY` repository secret); cause of the cross-run numeric differences.
+
+## FRED exchange-rate cross-check (2026-10-19)
+
+`src/quant_pipeline/fred_crosscheck.py`, `tools/fred_check.py` and the manually dispatched `research-fx-check` workflow compare the snapshot's USD/KRW bars with FRED `DEXKOUS` (H.10 noon rate) on matching dates. It reads the existing encrypted snapshot, collects nothing and changes no hash. The criteria are fixed in code before any real comparison: matched share >= 0.90, median |relative difference| <= 0.5%, 99th percentile <= 2%, maximum <= 5% (implementer choices; Yahoo's bar closes at the end of the London day and H.10 is a New York noon quote, so this checks closeness, not equality). Offline tests use hand-made responses (`tests/unit/test_fred_crosscheck.py`). Not yet run on the real snapshot: a new workflow file can be dispatched only once it is on main.
