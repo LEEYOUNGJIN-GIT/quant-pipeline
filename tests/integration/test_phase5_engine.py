@@ -240,3 +240,23 @@ def test_a_krw_dividend_is_credited_in_krw_without_an_fx_factor_and_a_usd_divide
     assert runner.ledger.cash == Decimal("5000.00"), "a KRW dividend must not be multiplied by the KRW-per-USD rate"
     runner.step(Event(ts, "corporate_action", "XNYS", "NYSE_C", "U-pay", {"action_type": "cash_dividend", "phase": "pay", "cash_amount": 1.0}))
     assert runner.ledger.cash == Decimal("5000.00") + Decimal(100) * MD.fx_mark(ts)
+
+
+def test_a_krw_only_ledger_never_consults_the_fx_rate_for_marks_fills_or_dividends(monkeypatch):
+    """Every currency-dependent call site in replay.py: a KRW holding must be valued, traded and paid dividends without an FX lookup."""
+    from quant_pipeline.event_time import Event
+    from quant_pipeline.replay import LedgerRunner
+
+    def no_fx(self, cutoff):
+        raise AssertionError("fx_mark was consulted for a KRW-only ledger")
+
+    runner = LedgerRunner(CFG, MD, CALS, Decimal("1000000.00"), {"KRX_A": 100}, OPEN.ts)
+    monkeypatch.setattr(type(MD), "fx_mark", no_fx)
+    sess = CALS.cals["XKRX"].sessions_in_range(pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-31"))[3]
+    ts = CALS.close("XKRX", sess)
+    assert runner.nav_at(ts) > 0
+    runner.step(Event(ts, "buy_fill", "XKRX", "KRX_A", "o1", {"quantity": 10}))
+    runner.entitlement["K"] = 110
+    runner.step(Event(ts, "corporate_action", "XKRX", "KRX_A", "K-pay", {"action_type": "cash_dividend", "phase": "pay", "cash_amount": 10.0}))
+    assert runner.ledger.holdings["KRX_A"] == 110
+    assert runner.max_affordable_buy(Event(ts, "buy_fill", "XKRX", "KRX_A", "o2", {"quantity": 5}), 5) >= 0
