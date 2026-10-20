@@ -29,7 +29,9 @@ def main() -> int:
         if i["missing_sessions_by_year"]:
             print(f"{i['symbol']:>10} missing sessions by year: {i['missing_sessions_by_year']}")
             print(f"{i['symbol']:>10} first missing: {' '.join(i['missing_sessions_first'])}")
-    print("fx:", {k: v for k, v in report["fx"].items() if k != "failures"})
+    print("fx:", {k: v for k, v in report["fx"].items() if k not in ("failures", "closes_over_limit_first")})
+    if report["fx"]["closes_over_limit"]:
+        print("fx closes over the age limit (market, session):", " | ".join(report["fx"]["closes_over_limit_first"]))
     print("rates:", {k: v for k, v in report["rates"].items() if k != "failures"})
     for f in report["failures"]:
         print("FAIL", f)

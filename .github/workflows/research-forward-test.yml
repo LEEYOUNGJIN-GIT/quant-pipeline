@@ -8,10 +8,16 @@ on:
     inputs:
       new_data_run_id:
         description: "run id of the research-data workflow that collected the LONGER snapshot"
-        required: true
+        required: false
+        default: ""
       finished_run_id:
         description: "run id of the finished research-run workflow whose frozen selection is applied"
-        required: true
+        required: false
+        default: ""
+      halt_diagnose_failed_run_id:
+        description: "diagnosis instead of a forward test: run id of a halted research-run (uses old_data_run_id as its snapshot and run_id as its lineage name); aggregates only"
+        required: false
+        default: ""
       old_data_run_id:
         description: "optional: run id of the research-data workflow of the finished run (to compare the overlapping years)"
         required: false
@@ -23,7 +29,7 @@ on:
       start:
         description: "first date of the forward interval (pre-registered default; change only with a written reason)"
         required: false
-        default: "2025-01-02"
+        default: "2025-04-23"
 
 permissions:
   contents: read
@@ -31,6 +37,7 @@ permissions:
 
 jobs:
   forward:
+    if: inputs.halt_diagnose_failed_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
@@ -65,6 +72,8 @@ jobs:
           openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl_old/snapshot.tar.gz.enc | tar -xzf - -C old
           OLD=$(ls old | grep -E '^[0-9a-f]{64}$' | head -1)
           uv run python tools/snapshot_prefix_diff.py --old "old/$OLD" --new "data/snapshots/research/$NEW_ID" --through 2024-12-31 --out prefix_diff.json
+      - name: Largest one-day moves per series (aggregates and dates only; the control window ends before the sealed holdout starts)
+        run: uv run python tools/price_jump_report.py --snapshot "data/snapshots/research/$NEW_ID" --from "${{ inputs.start }}" --out price_jumps.json
       - name: Run the forward test (frozen selection, no re-selection)
         run: |
           uv run python tools/forward_test.py --root . --finished-run "outputs/finished/${{ inputs.run_id }}" --out-root outputs/forward \
@@ -72,8 +81,8 @@ jobs:
       - name: Encrypt the result
         if: always()
         run: |
-          ls forward_result.json prefix_diff.json 2>/dev/null || exit 0
-          tar -czf - $(ls forward_result.json prefix_diff.json 2>/dev/null) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out forward.tar.gz.enc
+          ls forward_result.json prefix_diff.json price_jumps.json 2>/dev/null || exit 0
+          tar -czf - $(ls forward_result.json prefix_diff.json price_jumps.json 2>/dev/null) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out forward.tar.gz.enc
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
         with:
@@ -81,3 +90,34 @@ jobs:
           path: forward.tar.gz.enc
           retention-days: 90
           if-no-files-found: warn
+
+  halt_diagnose:
+    if: inputs.halt_diagnose_failed_run_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Get and decrypt the snapshot and the run directory
+        run: |
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+          gh run download "${{ inputs.old_data_run_id }}" -n research-snapshot -D dl
+          mkdir -p data/snapshots/research outputs/runs
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in dl/snapshot.tar.gz.enc | tar -xzf - -C data/snapshots/research
+          ID=$(ls data/snapshots/research | grep -E '^[0-9a-f]{64}$' | head -1)
+          ln -sfn "$ID" data/snapshots/research/current
+          gh run download "${{ inputs.halt_diagnose_failed_run_id }}" -n "finished-${{ inputs.run_id }}" -D fin
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in fin/finished.tar.gz.enc | tar -xzf - -C outputs/runs
+      - name: Re-run the finishing stage with the optimizer probe
+        run: |
+          uv run python tools/halt_diagnose.py --run-id "${{ inputs.run_id }}" --out-root outputs/runs --config configs/research_8_12asset.yaml 2>&1 | grep -v "^Model is not converging" | tail -n 120 || true

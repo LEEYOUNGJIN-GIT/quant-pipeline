@@ -18,6 +18,11 @@ on:
         description: "asset ids expected to pay dividends regularly (comma separated)"
         required: false
         default: "005930.KS,005380.KS,SPY,IEF,TLT,EEM"
+      keep_on_gate_failure:
+        description: "keep the encrypted snapshot even when a quality gate fails (the job still ends red; limits and verdicts are unchanged, later consumers must check the report)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -69,11 +74,15 @@ jobs:
           echo "SNAPSHOT_ID=$ID" >> "$GITHUB_ENV"
 
       - name: Data quality report (aggregate statistics only)
+        id: quality
+        continue-on-error: ${{ inputs.keep_on_gate_failure }}
         run: |
           uv run python tools/data_quality_report.py --snapshot "data/snapshots/research/$SNAPSHOT_ID" --universe configs/research_universe.yaml \
             --dividend-payers "${{ inputs.dividend_payers }}" --out quality_report.json
 
       - name: Validate with the project's own checks
+        id: validate
+        continue-on-error: ${{ inputs.keep_on_gate_failure }}
         run: uv run quant-pipeline data validate --config configs/research_8_12asset.yaml
 
       - name: Encrypt the snapshot
@@ -91,3 +100,12 @@ jobs:
             quality_report.json
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Gate outcome (a failed gate stays a failed job)
+        if: always()
+        run: |
+          echo "quality report: ${{ steps.quality.outcome }}; validate: ${{ steps.validate.outcome }}"
+          if [ "${{ steps.quality.outcome }}" = "failure" ] || [ "${{ steps.validate.outcome }}" = "failure" ]; then
+            echo "::error::a data gate failed; the snapshot was kept only because keep_on_gate_failure was set, and it is NOT a passed snapshot"
+            exit 1
+          fi

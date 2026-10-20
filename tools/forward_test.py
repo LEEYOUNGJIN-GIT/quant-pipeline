@@ -30,7 +30,7 @@ from quant_pipeline.research_pipeline import ResearchPipeline
 from quant_pipeline.splits import OuterFold, _block
 
 # ---- pre-registered (implementer's choice, to be confirmed by the user; see open-questions.md) -----------------------------------------------
-FORWARD_START = "2025-01-02"  # first model row on or after this date; the data window of the frozen selection ended 2024-12-31
+FORWARD_START = "2025-04-23"  # first model row on or after this date; amended from 2025-01-02 before any result existed (OQ-056): the FX series has a gap on 2025-04-18/21
 PRIMARY_BENCHMARK = "equal_weight_periodic"
 VERDICTS = {
     "supports": "the 95% interval of (strategy - benchmark) net excess Sharpe lies above zero",
@@ -100,9 +100,12 @@ def forward_run(p: ForwardPipeline, selection: Frozen, start_date: str = FORWARD
     run, block, start, end = forward_paths(p, selection, start_date)
     series = {"strategy": (run.result.nav, run.result.costs)} | {b: (r.nav, r.costs) for b, r in run.benchmarks.items()}
     rets = {k: interval_returns(nav) for k, (nav, _) in series.items()}
-    sessions = list(rets["strategy"])
+    # The engine's NAV starts at the opening timestamp, so it also holds valuations before the forward start; the block owns only its own anchors.
+    sessions = [s for s in block.valuation_sessions if s in rets["strategy"]]
+    if not sessions:
+        raise ValueError("the forward block owns no valuation interval")
     for k, r in rets.items():
-        if list(r) != sessions:
+        if any(s not in r for s in sessions):
             raise ValueError(f"{k}: its valuation intervals differ from the strategy's")
     rf_all = p.ev.risk_free()
     rf = np.array([rf_all[s] for s in sessions])
@@ -118,6 +121,8 @@ def forward_run(p: ForwardPipeline, selection: Frozen, start_date: str = FORWARD
         "intervals": len(sessions), "decisions": block.n_decisions, "bootstrap_status": boot.status,
         "start_state": "opening holdings (cash); no continuation of the finished run's ledger",
         "rule": {"benchmark": PRIMARY_BENCHMARK, "verdicts": VERDICTS}}
+    out["diagnostics"] = {k: {"largest_abs_interval_returns": [(sessions[i], round(float(a[i]), 4)) for i in np.argsort(-np.abs(a))[:3]],
+                              "intervals_with_abs_return_over_20pct": int((np.abs(a) > 0.2).sum())} for k, a in arrays.items()}
     if boot.status != "ok":
         out["verdict"] = "insufficient_sample"
         return out

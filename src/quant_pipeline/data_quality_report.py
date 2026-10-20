@@ -73,16 +73,24 @@ def fx_report(fx: pd.DataFrame, cals: Calendars, max_age_hours: float = MAX_FX_A
     ev, av = ev[order], av[order]
     first_av, last_av = pd.Timestamp(av[0]).tz_localize("UTC"), pd.Timestamp(av[-1]).tz_localize("UTC")
     ages: list[float] = []
+    late: list[tuple[str, str]] = []  # (market, session date) of every close whose latest quote is older than the limit: calendar facts, no prices
     for name in ("XKRX", "XNYS"):
         for s in cals.sessions(name, first_av.tz_localize(None).normalize(), last_av.tz_localize(None).normalize()):
             close = cals.close(name, s)
             if close < first_av or close > last_av:
                 continue
             i = int(np.searchsorted(av, np.datetime64(close.tz_localize(None)), side="right")) - 1
-            ages.append((np.datetime64(close.tz_localize(None)) - ev[i]) / np.timedelta64(1, "h"))
+            age = (np.datetime64(close.tz_localize(None)) - ev[i]) / np.timedelta64(1, "h")
+            ages.append(age)
+            if age > max_age_hours:
+                late.append((name, str(pd.Timestamp(s).date())))
     worst = float(max(ages)) if ages else 0.0
     out = {"quotes": len(fx), "first": str(first_av)[:10], "last": str(last_av)[:10], "closes_checked": len(ages), "max_age_at_close_hours": round(worst, 2),
            "min": round(float(fx.value.min()), 2), "max": round(float(fx.value.max()), 2)}
+    by_market = {m: sum(1 for x, _ in late if x == m) for m in ("XKRX", "XNYS")}
+    out["closes_over_limit"] = len(late)
+    out["closes_over_limit_by_market"] = by_market
+    out["closes_over_limit_first"] = [f"{m} {d}" for m, d in sorted(late, key=lambda t: t[1])[:30]]
     out["failures"] = [f"FX quote {worst:.1f} h old at a close, limit {max_age_hours}"] if worst > max_age_hours else []
     return out
 
