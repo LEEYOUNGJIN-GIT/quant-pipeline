@@ -91,3 +91,11 @@ def test_hmm_mode_forbids_fixed_table():
     d["regime"]["fixed_table"] = {"path": "x.csv"}
     with pytest.raises(ValidationError):
         Config.model_validate(d)
+
+
+def test_the_research_retry_solves_more_tightly_than_the_feasibility_tolerance_that_judges_it():
+    """OQ-058: a retry accurate only to the tolerance (1e-8 vs 1e-8) was rejected at the boundary and halted real4."""
+    c = load_config(RESEARCH)
+    tol = c.reproducibility.tolerances.constraint_feasibility
+    retry = c.solver_policy.numerical_retry
+    assert retry.eps_abs < tol and retry.eps_rel < tol
