@@ -551,12 +551,12 @@ Two full pre-holdout runs from the same snapshot and code (run ids 39138500192 a
 
 Nothing here opens it; the workflow stays human-triggered.
 
-- Inputs: `data_run_id=39136637764` (snapshot), `finished_run_id=39174911790` (finished pre-holdout run), `run_id=real3`, `acknowledgement=I_UNDERSTAND_THIS_OPENS_THE_FINAL_HOLDOUT`.
-- **Correction (2026-10-19): do not run it from main.** The lineage holds a hash of every `.py` file under `src/quant_pipeline` (`dependency.code_hash`), and the finished run was produced at commit 0b37f11. `src/` has changed since (`artifact_check.py`, `fred_crosscheck.py`), so the opening on main is expected to refuse with `lineage_mismatch`; this was not tried, because trying means opening. The opening must run from a ref whose `src/` equals the one at 0b37f11: a branch cut from 0b37f11 that adds only files outside `src/` (workflows, tools, docs), which do not enter the hash.
-- Before opening, run `research-holdout-preflight` from that ref (read-only: re-finishes the run from its checkpoints and verifies it; it fails with `lineage_mismatch` if the code differs). After opening, run `research-holdout-report` (opened run id) to read the aggregate holdout figures; the opened artifact is encrypted and has no other reader.
-- Retention: the snapshot (14 days) and the finished run (14 days) were created 2026-10-17/18, so both expire around 2026-10-31 to 2026-11-01. After that the opening needs a new collection, which is a different snapshot and a different holdout; its result is not comparable with real3.
+- Current lineage is real5 (2026-10-20). Inputs: `data_run_id=39136637764` (snapshot), `finished_run_id=39336521982` (finished pre-holdout run), `run_id=real5`, `acknowledgement=I_UNDERSTAND_THIS_OPENS_THE_FINAL_HOLDOUT`. `holdout/real3` belongs to the defective lineage (OQ-057) and must not be opened.
+- Run the opening from `holdout/real5` (or `main` while its `src/` is unchanged): the lineage holds a hash of every `.py` file under `src/quant_pipeline` (`dependency.code_hash`), so any later `src/` change makes the opening refuse with `lineage_mismatch`. `holdout/real5` points at merge commit 750e4f9. `research-holdout-preflight` on main with the inputs above succeeded (run 39359483988): the real5 run loads under that code. The preflight is read-only and does not open the holdout.
+- After opening, run `research-holdout-report` (opened run id) to read the aggregate holdout figures; the opened artifact is encrypted and has no other reader.
+- Retention: the snapshot (run 39136637764) expires around 2026-11-01 14:36 UTC and the finished real5 run around 2026-11-02. After that the opening needs a new collection, which is a different snapshot and a different holdout; its result is not comparable with real5.
 - One opening per lineage; afterwards the same holdout cannot be used for a fresh evaluation, so settle the universe and the limits in OQ-052, OQ-053, OQ-054 first.
-- Pre-holdout results are descriptive: strategy Sharpe 1.356 [1.048, 1.671] against equal_weight_periodic 1.471 [1.188, 1.779]; no claim of strategy validity.
+- Pre-holdout results are descriptive: strategy Sharpe 0.253 [-0.525, 1.053] against equal_weight_periodic 0.671 [-0.240, 1.644] (real5); forward test difference -0.46 [-1.71, 0.54], `no_evidence`; no claim of strategy validity.
 - Not done: FRED exchange-rate cross-check (needs a `FRED_API_KEY` repository secret); cause of the cross-run numeric differences.
 
 ## FRED exchange-rate cross-check (2026-10-19)
