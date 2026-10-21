@@ -82,6 +82,7 @@
 | 코드, 테스트, 워크플로, 설정 | 저장소 `main` | 영구 |
 | 명세, 진행 기록, 열린 질문 60건 | `IMPLEMENTATION_SPEC.md`, `PROGRESS.md`, `open-questions.md` | 결정과 근거의 이력 |
 | 이 보고서 | `docs/FINAL_REPORT.md` | |
+| 전방 경로 분해(OQ-061) | `docs/FORWARD_DECOMPOSITION.md` | 노출/선택 효과, 자산군, 종목 제외, 결정 17회. 기술 분석이며 판정 아님 |
 | real5 동결 선택 | `docs/frozen_selection/real5/final_selection.json` | 파라미터 네 필드만 |
 | 계보 고정 ref | 브랜치 `holdout/real5`(커밋 750e4f9) | `src/` 변경 시 개봉 불가가 되므로 고정 |
 | 실데이터 스냅샷, 실행 결과 | GitHub Actions 암호화 아티팩트 | 14일 보존, 만료됨 또는 곧 만료 |
