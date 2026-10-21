@@ -18,6 +18,10 @@ on:
         description: "diagnosis instead of a forward test: run id of a halted research-run (uses old_data_run_id as its snapshot and run_id as its lineage name); aggregates only"
         required: false
         default: ""
+      export_selection_branch:
+        description: "instead of a forward test: copy the four fields of the finished run's final_selection.json (trial hash, parameters, frozen flags) to docs/frozen_selection/<run_id>/final_selection.json on this NEW branch of the public repository (finished_run_id and run_id name the run)"
+        required: false
+        default: ""
       old_data_run_id:
         description: "optional: run id of the research-data workflow of the finished run (to compare the overlapping years)"
         required: false
@@ -37,7 +41,7 @@ permissions:
 
 jobs:
   forward:
-    if: inputs.halt_diagnose_failed_run_id == ''
+    if: inputs.halt_diagnose_failed_run_id == '' && inputs.export_selection_branch == ''
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
@@ -121,3 +125,40 @@ jobs:
       - name: Re-run the finishing stage with the optimizer probe
         run: |
           uv run python tools/halt_diagnose.py --run-id "${{ inputs.run_id }}" --out-root outputs/runs --config configs/research_8_12asset.yaml 2>&1 | grep -v "^Model is not converging" | tail -n 120 || true
+
+  export_selection:
+    if: inputs.export_selection_branch != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12.15"
+      - name: Install from the lock
+        run: |
+          python -m pip install --upgrade pip uv
+          if [ ! -f uv.lock ]; then cp uv.lock.candidate uv.lock; fi
+          uv sync --frozen --extra dev
+      - name: Decrypt the finished run and export the frozen selection (four fields only; nothing is printed except the file hash)
+        run: |
+          test -n "$SNAPSHOT_PASSPHRASE" || { echo "::error::repository secret SNAPSHOT_PASSPHRASE is not set"; exit 1; }
+          mkdir -p outputs/finished "docs/frozen_selection/${{ inputs.run_id }}"
+          gh run download "${{ inputs.finished_run_id }}" -n "finished-${{ inputs.run_id }}" -D fin
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SNAPSHOT_PASSPHRASE -in fin/finished.tar.gz.enc | tar -xzf - -C outputs/finished
+          uv run python tools/forward_test.py --finished-run outputs/finished --out-root outputs/unused --export-selection "docs/frozen_selection/${{ inputs.run_id }}/final_selection.json"
+          sha256sum "docs/frozen_selection/${{ inputs.run_id }}/final_selection.json"
+      - name: Push the file to a new branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ inputs.export_selection_branch }}"
+          git add "docs/frozen_selection/${{ inputs.run_id }}/final_selection.json"
+          git commit -m "Frozen selection of run ${{ inputs.run_id }} (finished run ${{ inputs.finished_run_id }}); four fields of final_selection.json"
+          git push origin "HEAD:refs/heads/${{ inputs.export_selection_branch }}"

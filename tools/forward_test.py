@@ -70,6 +70,17 @@ def selection_file(run_dir: Path) -> Path:
     return hits[0]
 
 
+SELECTION_KEYS = ("frozen", "created_before_holdout_access", "trial_hash", "parameters")
+
+
+def export_selection(run_dir: Path, out: Path) -> Frozen:
+    """Write the four fields of the run's ``final_selection.json`` that a forward test needs (nothing else of the file) and return the selection."""
+    doc = json.loads(selection_file(run_dir).read_text(encoding="utf-8"))
+    frozen_from_doc(doc)  # refuses a selection that is not marked frozen before holdout access
+    out.write_text(json.dumps({k: doc[k] for k in SELECTION_KEYS}, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    return load_selection(out)
+
+
 def load_selection(source: Path) -> Frozen:
     """The frozen selection from a finished run's directory, or from a copy of its ``final_selection.json`` (kept after the run's artifacts expire)."""
     path = source if source.is_file() else selection_file(source)
@@ -169,7 +180,7 @@ def main() -> int:
     ap.add_argument("--root", type=Path, default=Path("."), help="repository root holding data/snapshots/research/current (the LONGER snapshot)")
     ap.add_argument("--finished-run", type=Path, default=None, help="directory of the finished (decrypted) run whose frozen selection is applied")
     ap.add_argument("--selection-json", type=Path, default=None, help="a copy of that run's final_selection.json, used instead of --finished-run")
-    ap.add_argument("--export-selection", type=Path, default=None, help="write a copy of the finished run's final_selection.json here (nothing is printed) and exit")
+    ap.add_argument("--export-selection", type=Path, default=None, help="write the four fields of the finished run's final_selection.json that a forward test needs to this file (nothing is printed) and exit")
     ap.add_argument("--out-root", type=Path, required=True)
     ap.add_argument("--run-id", default="forward")
     ap.add_argument("--config", default="configs/research_8_12asset.yaml")
@@ -182,8 +193,7 @@ def main() -> int:
     if args.export_selection:
         if args.finished_run is None:
             ap.error("--export-selection needs --finished-run")
-        load_selection(args.finished_run)  # refuses a selection that is not marked frozen
-        args.export_selection.write_bytes(selection_file(args.finished_run).read_bytes())
+        export_selection(args.finished_run, args.export_selection)
         return 0
     selection = load_selection(args.finished_run or args.selection_json)
     p = ForwardPipeline(args.root, args.out_root, args.run_id, config=args.config, allow_synthetic=args.allow_synthetic)
