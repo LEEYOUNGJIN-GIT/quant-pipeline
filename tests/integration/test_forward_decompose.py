@@ -61,3 +61,33 @@ def test_the_attribution_tracks_the_interval_returns_it_approximates(out):
 def test_the_summary_passes_the_wording_rules_and_holds_no_levels(out):
     text = json.dumps(out)
     assert not D.forbidden_in(text) and "nav_krw" not in text and "qty_" not in text
+
+
+def test_the_exposure_and_selection_effects_add_up_to_the_gap_when_the_paths_are_built_from_sleeves():
+    rng = np.random.default_rng(7)
+    n, k = 40, 4
+    r = rng.normal(0.0005, 0.01, (n, k))
+    ws = rng.dirichlet(np.ones(k + 1), n)[:, :k]
+    wb = np.tile(np.array([0.2375] * k), (n, 1))
+    rf = np.full(n, 0.0001)
+    rs, s = D.sleeve_return(ws, r)
+    rb, b = D.sleeve_return(wb, r)
+    arr_s, arr_b = s * rs + (1 - s) * rf, b * rb + (1 - b) * rf
+    out = D.sleeve_analysis([f"A{i}" for i in range(k)], ws, wb, r, rf, arr_s, arr_b, np.array(["2025Q1"] * n), [f"2025-01-{i + 1:02d}" for i in range(n)], [], 252)
+    assert abs(out["residual"]) < 1e-3 and out["sum_of_gap"] == pytest.approx(out["exposure_effect"] + out["selection_effect"], abs=1e-3)
+
+
+def test_dropping_an_asset_renormalises_the_sleeve_without_it():
+    w = np.array([[0.2, 0.3, 0.1]])
+    r = np.array([[0.10, 0.00, -0.10]])
+    full, share = D.sleeve_return(w, r)
+    dropped, share_d = D.sleeve_return(w, r, drop=0)
+    assert share[0] == pytest.approx(0.6) and full[0] == pytest.approx((0.02 - 0.01) / 0.6)
+    assert share_d[0] == pytest.approx(0.4) and dropped[0] == pytest.approx(-0.01 / 0.4)
+
+
+def test_the_sleeve_analysis_is_complete_and_its_decision_table_covers_the_decisions(out):
+    sl = out["sleeve_analysis"]
+    assert set(sl) >= {"exposure_effect", "selection_effect", "residual", "by_group", "leave_one_asset_out", "decision_table", "by_quarter"}
+    assert len(sl["decision_table"]) == out["decisions"]["count"] and all(0.0 <= d["risky_budget"] <= 1.0 for d in sl["decision_table"])
+    assert sum(g["mean_nav_share"]["strategy"] for g in sl["by_group"].values()) == pytest.approx(out["risky_share"]["strategy"]["mean"], abs=1e-3)

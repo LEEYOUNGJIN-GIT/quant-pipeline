@@ -87,7 +87,83 @@ def contributions(tab: dict[str, Any], scored: list[str]) -> dict[str, Any]:
     ret = tab["marks"][k] / tab["marks"][k - 1] - 1.0
     contrib = np.nansum(tab["weights"][k - 1] * np.nan_to_num(ret, nan=0.0), axis=0)
     risky = tab["weights"][k - 1].sum(axis=1)
-    return {"per_asset": {a: round(float(c), 4) for a, c in zip(tab["assets"], contrib)}, "sum": round(float(contrib.sum()), 4), "risky_share": risky}
+    return {"per_asset": {a: round(float(c), 4) for a, c in zip(tab["assets"], contrib)}, "sum": round(float(contrib.sum()), 4), "risky_share": risky,
+            "weights": tab["weights"][k - 1], "returns": np.nan_to_num(ret, nan=0.0)}
+
+
+GROUPS = {"005930.KS": "korean_equity", "000660.KS": "korean_equity", "005380.KS": "korean_equity", "035420.KS": "korean_equity",
+          "SPY": "us_and_em_equity_etf", "EEM": "us_and_em_equity_etf", "IEF": "treasury_etf", "TLT": "treasury_etf", "GLD": "gold_etf"}
+ACTIVE = 0.02  # an interval enters sleeve statistics only when both paths hold at least this share of NAV in risky assets
+
+
+def sleeve_return(w: np.ndarray, r: np.ndarray, drop: int | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Return of the risky sleeve (start weights renormalised to the risky assets, optionally without one asset) and the sleeve's NAV share per interval."""
+    w = w.copy()
+    if drop is not None:
+        w[:, drop] = 0.0
+    share = w.sum(axis=1)
+    return np.divide((w * r).sum(axis=1), share, out=np.zeros(len(share)), where=share > 1e-9), share
+
+
+def compound(x: np.ndarray) -> float:
+    return round(float(np.prod(1.0 + x) - 1.0), 4)
+
+
+def sleeve_analysis(assets: list[str], ws: np.ndarray, wb: np.ndarray, r: np.ndarray, rf: np.ndarray, arr_s: np.ndarray, arr_b: np.ndarray,
+                    quarters: np.ndarray, scored: list[str], decs: list, ppy: int) -> dict[str, Any]:
+    """Split the strategy-minus-benchmark gap into how much was invested (exposure) and what was held inside the risky sleeve (selection).
+
+    With s, b the risky shares and rS, rB the sleeve returns, strategy - benchmark = (s - b)(rB - rf) + s (rS - rB) holds exactly for
+    strategy = s rS + (1 - s) rf and benchmark = b rB + (1 - b) rf; the part of the actual gap that this does not reproduce (interval trades, dividends,
+    cash interest) is reported as the residual."""
+    rs, s = sleeve_return(ws, r)
+    rb, b = sleeve_return(wb, r)
+    expo_eff, sel_eff = (s - b) * (rb - rf), s * (rs - rb)
+    gap = arr_s - arr_b
+    both = (s > ACTIVE) & (b > ACTIVE)
+
+    def by(x: np.ndarray, q: str) -> float:
+        return round(float(x[quarters == q].sum()), 4)
+
+    out: dict[str, Any] = {
+        "identity": "strategy - benchmark = (s - b)(rB - rf) + s(rS - rB); sums are arithmetic over the scored intervals",
+        "sum_of_gap": round(float(gap.sum()), 4), "exposure_effect": round(float(expo_eff.sum()), 4), "selection_effect": round(float(sel_eff.sum()), 4),
+        "residual": round(float(gap.sum() - expo_eff.sum() - sel_eff.sum()), 4),
+        "by_quarter": {q: {"gap": by(gap, q), "exposure_effect": by(expo_eff, q), "selection_effect": by(sel_eff, q)} for q in sorted(set(quarters))},
+        "common_active_intervals": int(both.sum()),
+    }
+    if both.sum() > 1:
+        out["sleeve_paths_on_common_intervals"] = {"strategy": path_stats(rs[both], rf[both], ppy), PRIMARY_BENCHMARK: path_stats(rb[both], rf[both], ppy)}
+        out["sleeve_interval_win_share"] = round(float((rs[both] > rb[both]).mean()), 4)
+        out["sleeve_mean_weight_inside_sleeve"] = {
+            a: {"strategy": round(float((ws[both, i] / s[both]).mean()), 4), PRIMARY_BENCHMARK: round(float((wb[both, i] / b[both]).mean()), 4)} for i, a in enumerate(assets)}
+    groups = sorted({GROUPS.get(a, "other") for a in assets})
+    out["by_group"] = {}
+    for g in groups:
+        cols = [i for i, a in enumerate(assets) if GROUPS.get(a, "other") == g]
+        out["by_group"][g] = {
+            "mean_nav_share": {"strategy": round(float(ws[:, cols].sum(axis=1).mean()), 4), PRIMARY_BENCHMARK: round(float(wb[:, cols].sum(axis=1).mean()), 4)},
+            "contribution": {"strategy": round(float((ws[:, cols] * r[:, cols]).sum()), 4), PRIMARY_BENCHMARK: round(float((wb[:, cols] * r[:, cols]).sum()), 4)}}
+    out["leave_one_asset_out"] = {}
+    for i, a in enumerate(assets):
+        rs_i, s_i = sleeve_return(ws, r, i)
+        rb_i, b_i = sleeve_return(wb, r, i)
+        m = (s_i > ACTIVE) & (b_i > ACTIVE)
+        if m.sum() > 1:
+            out["leave_one_asset_out"][a] = {"intervals": int(m.sum()), "sleeve_return_strategy": compound(rs_i[m]), "sleeve_return_benchmark": compound(rb_i[m]),
+                                             "selection_effect_sum": round(float((s_i[m] * (rs_i[m] - rb_i[m])).sum()), 4)}
+    dates = [d.cutoff_utc[:10] for d in decs]
+    table = []
+    for i, d in enumerate(decs):
+        hi = dates[i + 1] if i + 1 < len(decs) else "9999-12-31"
+        w = np.array([dates[i] <= x < hi for x in scored])
+        table.append({"date": dates[i], "branch": d.branch, "risky_budget": round(float(d.b_final), 4), "intended_one_way_turnover": round(float(d.one_way_turnover_intended), 4),
+                      "orders": d.n_orders, "intervals": int(w.sum()),
+                      "mean_realised_risky_share": round(float(s[w].mean()), 4) if w.any() else None,
+                      "mean_benchmark_risky_share": round(float(b[w].mean()), 4) if w.any() else None,
+                      "strategy_return": compound(arr_s[w]) if w.any() else None, "benchmark_return": compound(arr_b[w]) if w.any() else None})
+    out["decision_table"] = table
+    return out
 
 
 def drawdown_episode(r: np.ndarray) -> tuple[int, int, float]:
@@ -140,7 +216,10 @@ def decompose(p: ForwardPipeline, selection: Frozen, start_date: str = FORWARD_S
     for d in decs:
         branches[d.branch] = branches.get(d.branch, 0) + 1
     nav_mean = {k: float(np.mean(tabs[k]["nav"])) for k in tabs}
+    sleeve = sleeve_analysis(tabs["strategy"]["assets"], con["strategy"]["weights"], con[PRIMARY_BENCHMARK]["weights"], con["strategy"]["returns"], rf,
+                             arr["strategy"], arr[PRIMARY_BENCHMARK], np.asarray(quarters), scored, sorted(decs, key=lambda d: d.position), ppy)
     return {
+        "sleeve_analysis": sleeve,
         "note": "descriptive decomposition of one path; not an evidence statement, nothing here is tuned or selected",
         "intervals": len(scored), "first_session": scored[0], "last_session": scored[-1], "selection_trial": selection.winner_hash[:19],
         "missing_marks": {k: tabs[k]["missing_marks"] for k in tabs},
