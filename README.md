@@ -10,7 +10,9 @@ resolved.
 |---|---|---|
 | Fixture (`configs/fixture_3asset.yaml`) | bundled, deterministic 3-asset fixture | complete, verified in CI on every push |
 | Research, **synthetic** (`configs/research_8_12asset.yaml`, reduced by `tests/support/research_smoke.py`) | generated data, labelled `synthetic_engineering_test` | runs end to end, resumable, look-ahead tested, holdout procedure tested |
-| Research, **real data** | a verified, content-addressed snapshot collected from licensed providers | **not run yet**: no snapshot has been collected |
+| Research, **real data** | a verified, content-addressed snapshot collected from licensed providers | run (lineage real5): no evidence of an advantage over equal weight in either window; the final holdout stays sealed. See `docs/FINAL_REPORT.md` |
+
+The real-data results, the strategy description and the conclusions are in `docs/FINAL_REPORT.md`. The project's value is the evaluation machinery (it found two defects that changed the first result), not a validated trading strategy.
 
 Synthetic runs show that the machinery works. They say nothing about strategy performance, and the code refuses a synthetic snapshot
 unless you pass `--allow-synthetic`.
