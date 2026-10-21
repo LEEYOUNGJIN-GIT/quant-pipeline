@@ -1,0 +1,20 @@
+{
+ "created_before_holdout_access": true,
+ "frozen": true,
+ "parameters": {
+  "agents.defensive.overlay_gamma_candidates": 1.0,
+  "agents.mean_reversion.entry_z_candidates": 1.5,
+  "agents.trend.horizon_weight_candidates": [
+   0.2,
+   0.3,
+   0.3,
+   0.2
+  ],
+  "objective.lambda_cost_candidates": 0.5,
+  "objective.lambda_risk_candidates": 2.0,
+  "objective.lambda_track_candidates": 0.5,
+  "pca.n_components_candidates": 2,
+  "regime.agent_gate_candidates": "balanced_3state"
+ },
+ "trial_hash": "sha256:c054d3415dec57f34236930ae771f811ea4042a77ee12e34ebde135a97969bc0"
+}
