@@ -57,14 +57,23 @@ class Frozen:
     winner_parameters: dict[str, Any]
 
 
-def load_selection(run_dir: Path) -> Frozen:
-    hits = sorted(run_dir.rglob("final_selection.json"))
-    if not hits:
-        raise FileNotFoundError(f"no final_selection.json under {run_dir}")
-    doc = json.loads(hits[0].read_text(encoding="utf-8"))
+def frozen_from_doc(doc: dict[str, Any]) -> Frozen:
     if not doc.get("frozen") or not doc.get("created_before_holdout_access"):
         raise ValueError("the selection is not marked frozen before holdout access")
     return Frozen(doc["trial_hash"], doc["parameters"])
+
+
+def selection_file(run_dir: Path) -> Path:
+    hits = sorted(run_dir.rglob("final_selection.json"))
+    if not hits:
+        raise FileNotFoundError(f"no final_selection.json under {run_dir}")
+    return hits[0]
+
+
+def load_selection(source: Path) -> Frozen:
+    """The frozen selection from a finished run's directory, or from a copy of its ``final_selection.json`` (kept after the run's artifacts expire)."""
+    path = source if source.is_file() else selection_file(source)
+    return frozen_from_doc(json.loads(path.read_text(encoding="utf-8")))
 
 
 class ForwardPipeline(ResearchPipeline):
@@ -158,7 +167,9 @@ def forbidden_in(text: str) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", type=Path, default=Path("."), help="repository root holding data/snapshots/research/current (the LONGER snapshot)")
-    ap.add_argument("--finished-run", type=Path, required=True, help="directory of the finished (decrypted) run whose frozen selection is applied")
+    ap.add_argument("--finished-run", type=Path, default=None, help="directory of the finished (decrypted) run whose frozen selection is applied")
+    ap.add_argument("--selection-json", type=Path, default=None, help="a copy of that run's final_selection.json, used instead of --finished-run")
+    ap.add_argument("--export-selection", type=Path, default=None, help="write a copy of the finished run's final_selection.json here (nothing is printed) and exit")
     ap.add_argument("--out-root", type=Path, required=True)
     ap.add_argument("--run-id", default="forward")
     ap.add_argument("--config", default="configs/research_8_12asset.yaml")
@@ -166,7 +177,15 @@ def main() -> int:
     ap.add_argument("--allow-synthetic", action="store_true")
     ap.add_argument("--json-out", type=Path, default=None)
     args = ap.parse_args()
-    selection = load_selection(args.finished_run)
+    if (args.finished_run is None) == (args.selection_json is None):
+        ap.error("give exactly one of --finished-run and --selection-json")
+    if args.export_selection:
+        if args.finished_run is None:
+            ap.error("--export-selection needs --finished-run")
+        load_selection(args.finished_run)  # refuses a selection that is not marked frozen
+        args.export_selection.write_bytes(selection_file(args.finished_run).read_bytes())
+        return 0
+    selection = load_selection(args.finished_run or args.selection_json)
     p = ForwardPipeline(args.root, args.out_root, args.run_id, config=args.config, allow_synthetic=args.allow_synthetic)
     result = forward_run(p, selection, args.start)
     text = json.dumps(result, indent=1, sort_keys=True)
