@@ -102,3 +102,24 @@ def test_the_verdict_rule_is_applied_to_the_interval_only():
     assert F.verdict(0.1, 0.9) == "supports" and F.verdict(-0.5, 0.4) == "no_evidence" and F.verdict(-0.9, -0.1) == "against"
     assert F.verdict(float("nan"), 0.1) == "undefined"
     assert F.verdict(0.0, 1.0) == "no_evidence" and F.verdict(-1.0, 0.0) == "no_evidence"  # touching zero is not a result
+
+
+def test_a_saved_copy_of_the_frozen_selection_gives_the_same_selection_as_the_finished_run_and_holds_nothing_else(base, tmp_path):
+    t = base["p"].ev.design.trials[0]
+    doc = {"frozen": True, "created_before_holdout_access": True, "trial_hash": t["trial_hash"], "parameters": t["parameters"],
+           "something_else": {"not": "exported"}}
+    run_dir = tmp_path / "finished"
+    run_dir.mkdir()
+    (run_dir / "final_selection.json").write_text(json.dumps(doc), encoding="utf-8")
+    copy = tmp_path / "saved.json"
+    assert F.export_selection(run_dir, copy) == frozen(base["p"], 0)
+    assert F.load_selection(copy) == F.load_selection(run_dir)
+    assert set(json.loads(copy.read_text(encoding="utf-8"))) == set(F.SELECTION_KEYS)
+    unfrozen = tmp_path / "unfrozen.json"
+    unfrozen.write_text(json.dumps({**doc, "frozen": False}), encoding="utf-8")
+    with pytest.raises(ValueError, match="not marked frozen"):
+        F.load_selection(unfrozen)
+    (run_dir / "final_selection.json").write_text(json.dumps({**doc, "frozen": False}), encoding="utf-8")
+    with pytest.raises(ValueError, match="not marked frozen"):
+        F.export_selection(run_dir, tmp_path / "never.json")
+    assert not (tmp_path / "never.json").exists()
