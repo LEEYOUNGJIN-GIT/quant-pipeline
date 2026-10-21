@@ -99,7 +99,7 @@ jobs:
       - name: Encrypt the result
         if: always()
         run: |
-          ls forward_result.json prefix_diff.json price_jumps.json decomposition.json 2>/dev/null || exit 0
+          [ -n "$(ls forward_result.json prefix_diff.json price_jumps.json decomposition.json 2>/dev/null)" ] || exit 0
           tar -czf - $(ls forward_result.json prefix_diff.json price_jumps.json decomposition.json 2>/dev/null) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_PASSPHRASE -out forward.tar.gz.enc
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
